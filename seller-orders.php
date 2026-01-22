@@ -37,10 +37,13 @@ if (!$seller) {
     exit();
 }
 
-// Initialize seller variables with default values
-$seller_name = isset($seller['FullName']) ? $seller['FullName'] : 'Seller';
-$seller_email = isset($seller['Email']) ? $seller['Email'] : '';
-$initial = isset($seller['FullName']) ? strtoupper(substr($seller['FullName'], 0, 1)) : 'S';
+// Extract seller information for display
+$seller_name = htmlspecialchars($seller['FullName'] ?? 'Seller');
+$seller_email = htmlspecialchars($seller['Email'] ?? '');
+$seller_image = htmlspecialchars($seller['ImagePath'] ?? '');
+
+// Get first letter for profile image fallback
+$initial = !empty($seller_name) ? strtoupper(substr($seller_name, 0, 1)) : 'S';
 
 // Handle AJAX order status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status']) && isset($_POST['ajax'])) {
@@ -68,11 +71,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status']) && i
             $response['success'] = true;
             $response['message'] = "Order #" . str_pad($order_id, 6, '0', STR_PAD_LEFT) . " status updated to $new_status!";
             $response['new_status'] = $new_status;
-            
-            // If order is completed, update meal sales counts
-            if ($new_status === 'Completed') {
-                // This could trigger any post-completion logic
-            }
         } else {
             $response['message'] = "Error updating order: " . $conn->error;
         }
@@ -110,11 +108,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status']) && !
         
         if ($update_stmt->execute()) {
             $success_message = "Order #" . str_pad($order_id, 6, '0', STR_PAD_LEFT) . " status updated to $new_status!";
-            
-            // If order is completed, update meal sales counts
-            if ($new_status === 'Completed') {
-                // This could trigger any post-completion logic
-            }
         } else {
             $error_message = "Error updating order: " . $conn->error;
         }
@@ -193,7 +186,7 @@ if (count($orders) > 0) {
     }
 }
 
-// Get order statistics
+// Get order statistics - Count DISTINCT orders
 $stats_sql = "SELECT 
     COUNT(DISTINCT o.OrderID) as total_orders,
     SUM(CASE WHEN o.Status = 'Pending' THEN 1 ELSE 0 END) as pending_orders,
@@ -223,25 +216,29 @@ $stats = [
 ];
 $stats_stmt->close();
 
-// Get active orders count for notification badge
-$active_sql = "SELECT COUNT(DISTINCT o.OrderID) as active_count
+// Get pending orders count for notification badge - SAME AS HOMEPAGE (COUNT DISTINCT ORDERS)
+$pending_count = 0;
+$pending_sql = "SELECT COUNT(DISTINCT o.OrderID) as pending_count
                 FROM `Order` o
                 JOIN OrderDetails od ON o.OrderID = od.OrderID
                 JOIN Meal m ON od.MealID = m.MealID
-                WHERE m.SellerID = ? AND o.Status IN ('Pending', 'Confirmed', 'Preparing', 'Out for Delivery')";
-$active_stmt = $conn->prepare($active_sql);
-$active_stmt->bind_param("i", $seller_id);
-$active_stmt->execute();
-$active_result = $active_stmt->get_result();
-$active_data = $active_result->fetch_assoc();
-$active_count = $active_data ? ($active_data['active_count'] ?? 0) : 0;
-$active_stmt->close();
+                WHERE m.SellerID = ? AND o.Status = 'Pending'";
+$stmt = $conn->prepare($pending_sql);
+if ($stmt) {
+    $stmt->bind_param("i", $seller_id);
+    $stmt->execute();
+    $pending_result = $stmt->get_result();
+    if ($pending_result) {
+        $pending_data = $pending_result->fetch_assoc();
+        $pending_count = $pending_data['pending_count'] ?: 0;
+    }
+    $stmt->close();
+}
 
 // Get pending orders for notification modal
-$pending_count = $stats['pending_orders'] ?? 0;
 $pending_orders = [];
 if ($pending_count > 0) {
-    $all_pending_sql = "SELECT DISTINCT o.OrderID, o.OrderDate, o.TotalAmount,
+    $all_pending_sql = "SELECT DISTINCT o.OrderID, o.OrderDate, o.TotalAmount, o.Notes,
                            c.FullName as CustomerName, c.ContactNo,
                            GROUP_CONCAT(CONCAT(m.Title, ' (x', od.Quantity, ')') SEPARATOR ', ') as Items
                     FROM `Order` o
@@ -450,6 +447,7 @@ $conn->close();
             width: 45px;
             height: 45px;
             border-radius: 50%;
+            border: 2px solid var(--primary-dark);
             background-color: var(--primary);
             display: flex;
             justify-content: center;
@@ -465,6 +463,13 @@ $conn->close();
         .user-profile:hover {
             background-color: var(--primary-dark);
             transform: scale(1.05);
+        }
+
+        .user-profile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .dropdown-menu {
@@ -509,6 +514,14 @@ $conn->close();
             font-weight: 700;
             font-size: 1.2rem;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .user-initial img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .user-details {
@@ -907,7 +920,7 @@ $conn->close();
             color: var(--primary);
         }
         
-        /* Messages - UPDATED */
+        /* Messages */
         .message-container {
             margin-bottom: 25px;
         }
@@ -1129,7 +1142,7 @@ $conn->close();
             flex-shrink: 0;
         }
         
-        /* Order Progress Bar */
+        /* Order Progress Bar - Only for active orders */
         .order-progress {
             padding: 20px 25px;
             border-top: 1px solid var(--light-gray);
@@ -1659,12 +1672,22 @@ $conn->close();
                 <!-- Profile dropdown -->
                 <div class="profile-dropdown">
                     <div class="user-profile" id="profileToggle">
-                        <?php echo $initial; ?>
+                        <?php if (!empty($seller_image)): ?>
+                            <img src="<?php echo $seller_image; ?>" alt="<?php echo $seller_name; ?>">
+                        <?php else: ?>
+                            <?php echo $initial; ?>
+                        <?php endif; ?>
                     </div>
                     <div class="dropdown-menu" id="dropdownMenu">
                         <div class="dropdown-header">
                             <div class="user-info">
-                                <div class="user-initial"><?php echo $initial; ?></div>
+                                <div class="user-initial">
+                                    <?php if (!empty($seller_image)): ?>
+                                        <img src="<?php echo $seller_image; ?>" alt="<?php echo $seller_name; ?>">
+                                    <?php else: ?>
+                                        <?php echo $initial; ?>
+                                    <?php endif; ?>
+                                </div>
                                 <div class="user-details">
                                     <div class="user-name"><?php echo htmlspecialchars($seller_name); ?></div>
                                     <div class="user-email"><?php echo htmlspecialchars($seller_email); ?></div>
@@ -1674,9 +1697,6 @@ $conn->close();
                         <div class="dropdown-divider"></div>
                         <a href="seller-profile.php" class="dropdown-item">
                             <i class="fas fa-user"></i> Seller Profile
-                        </a>
-                        <a href="seller-settings.php" class="dropdown-item">
-                            <i class="fas fa-cog"></i> Store Settings
                         </a>
                         <div class="dropdown-divider"></div>
                         <a href="#" class="dropdown-item logout" id="logoutLink">
@@ -1713,6 +1733,12 @@ $conn->close();
                                 <strong><?php echo htmlspecialchars($order['CustomerName']); ?></strong> ordered: 
                                 <?php echo htmlspecialchars($order['Items']); ?>
                             </div>
+                            <?php if (!empty($order['Notes'])): ?>
+                                <div class="notification-message" style="color: var(--dark); background-color: #f9f9f9; padding: 10px; border-radius: 5px; margin-top: 5px;">
+                                    <strong><i class="fas fa-sticky-note"></i> Notes:</strong> 
+                                    <?php echo htmlspecialchars(substr($order['Notes'], 0, 100)); ?><?php echo strlen($order['Notes']) > 100 ? '...' : ''; ?>
+                                </div>
+                            <?php endif; ?>
                             <div class="notification-info">
                                 <span><i class="far fa-calendar"></i> <?php echo date('M d, Y h:i A', strtotime($order['OrderDate'])); ?></span>
                                 <span><i class="fas fa-money-bill-wave"></i> ₱<?php echo number_format($order['TotalAmount'], 2); ?></span>
@@ -1913,6 +1939,14 @@ $conn->close();
                                         <i class="fas fa-phone"></i> 
                                         Contact: <?php echo htmlspecialchars($first_item['CustomerContact']); ?>
                                     </div>
+                                    
+                                    <!-- Notes Display - Simple design -->
+                                    <?php if (!empty($order['Notes'])): ?>
+                                    <div class="order-address">
+                                        <i class="fas fa-sticky-note"></i> 
+                                        notes: <?php echo htmlspecialchars($order['Notes']); ?>
+                                    </div>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
                             <div class="order-amount">
@@ -2186,7 +2220,7 @@ $conn->close();
         });
     });
 
-    // Animate pending badge
+    // Animate pending badge when there are new orders
     if (pendingBadge) {
         pendingBadge.style.animation = 'pulse 2s infinite';
         setTimeout(() => {
@@ -2233,7 +2267,7 @@ $conn->close();
                     Confirm Logout
                 </h3>
                 <p style="color: var(--gray); font-size: 1rem;">
-                    Are you sure you want to logout from Seller Dashboard?
+                    Are you sure you want to logout?
                 </p>
             </div>
             <div style="display: flex; gap: 15px; justify-content: center;">
@@ -2272,10 +2306,107 @@ $conn->close();
 
     // Contact customer function
     function contactCustomer(orderId) {
-        // In a real application, this would open a messaging interface
         alert('Opening customer messaging interface for Order #' + orderId);
-        // window.location.href = `messages.php?order_id=${orderId}`;
     }
+
+    // Show notification function
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.textContent = message;
+        
+        const bgColor = type === 'success' ? 'var(--success)' : type === 'warning' ? 'var(--warning)' : 'var(--danger)';
+        
+        notification.style.cssText = `
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            background-color: ${bgColor};
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            z-index: 3000;
+            animation: fadeIn 0.3s ease;
+            font-size: 1rem;
+            font-weight: 600;
+            max-width: 300px;
+        `;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'fadeIn 0.3s ease reverse';
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 300);
+        }, 3000);
+    }
+
+    // Auto-refresh notification badge every 30 seconds
+    function refreshNotificationBadge() {
+        fetch('check-pending-orders.php')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    const pendingCount = data.pending_count;
+                    let badge = document.getElementById('pendingBadge');
+                    
+                    // Update or create badge
+                    if (pendingCount > 0) {
+                        if (badge) {
+                            badge.textContent = pendingCount;
+                        } else {
+                            // Create badge if it doesn't exist
+                            badge = document.createElement('span');
+                            badge.id = 'pendingBadge';
+                            badge.className = 'badge';
+                            badge.textContent = pendingCount;
+                            const bellIcon = document.querySelector('.notification-icon-bell');
+                            if (bellIcon) {
+                                bellIcon.appendChild(badge);
+                            }
+                        }
+                        
+                        // Add animation if badge wasn't there before
+                        if (!badge.style.animation) {
+                            badge.style.animation = 'pulse 2s infinite';
+                            setTimeout(() => {
+                                badge.style.animation = '';
+                            }, 3000);
+                        }
+                        
+                        // Update modal title if modal is open
+                        const modalTitle = document.querySelector('.notification-header h2');
+                        if (modalTitle) {
+                            modalTitle.innerHTML = `<i class="fas fa-bell"></i> Pending Orders (${pendingCount})`;
+                        }
+                    } else {
+                        // Remove badge if no pending orders
+                        if (badge) {
+                            badge.remove();
+                        }
+                        
+                        // Update modal title
+                        const modalTitle = document.querySelector('.notification-header h2');
+                        if (modalTitle) {
+                            modalTitle.innerHTML = `<i class="fas fa-bell"></i> Pending Orders (0)`;
+                        }
+                    }
+                } else {
+                    console.error('Error from server:', data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error refreshing notifications:', error);
+            });
+    }
+
+    // Start auto-refresh
+    setInterval(refreshNotificationBadge, 30000);
 
     // AJAX for updating order status without page refresh
     document.addEventListener('DOMContentLoaded', function() {
@@ -2306,7 +2437,12 @@ $conn->close();
                         method: 'POST',
                         body: formData
                     })
-                    .then(response => response.json())
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         if (data.success) {
                             // Success - update the UI without refreshing
@@ -2367,7 +2503,7 @@ $conn->close();
         updateActionButtons(orderId, newStatus);
         
         // Show success message
-        showMessage(message, 'success');
+        showNotification(message, 'success');
     }
     
     // Update progress bar width
@@ -2514,7 +2650,12 @@ $conn->close();
                             method: 'POST',
                             body: formData
                         })
-                        .then(response => response.json())
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Network response was not ok');
+                            }
+                            return response.json();
+                        })
                         .then(data => {
                             if (data.success) {
                                 updateOrderUI(orderId, newStatus, data.message);
@@ -2548,13 +2689,11 @@ $conn->close();
         }
     }
     
-    // Show message function - UPDATED
+    // Show message function (for AJAX responses)
     function showMessage(message, type) {
-        // Remove any existing messages
         const existingMsg = document.querySelector('.ajax-message');
         if (existingMsg) existingMsg.remove();
         
-        // Create new message
         const messageDiv = document.createElement('div');
         messageDiv.className = `ajax-message ${type}`;
         messageDiv.innerHTML = `
@@ -2564,7 +2703,6 @@ $conn->close();
         
         document.body.appendChild(messageDiv);
         
-        // Remove after 5 seconds
         setTimeout(() => {
             if (messageDiv.parentNode) {
                 messageDiv.parentNode.removeChild(messageDiv);
@@ -2584,7 +2722,6 @@ $conn->close();
             } else {
                 pendingBadge.textContent = currentCount;
                 pendingBadge.style.display = 'flex';
-                // Restart animation
                 pendingBadge.style.animation = 'pulse 2s infinite';
             }
         }

@@ -40,7 +40,7 @@ if (!$user) {
     exit();
 }
 
-// Handle AJAX meal details request - ADD THIS
+// Handle AJAX meal details request
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['action'] == 'get_meal_details') {
     header('Content-Type: application/json');
     
@@ -93,17 +93,28 @@ $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $category = isset($_GET['category']) ? $_GET['category'] : '';
 $sort = isset($_GET['sort']) ? $_GET['sort'] : 'newest';
 
+// Get seller filter if exists
+$seller_id = isset($_GET['seller_id']) ? (int)$_GET['seller_id'] : 0;
+$seller_name = isset($_GET['seller_name']) ? urldecode($_GET['seller_name']) : '';
+
 // Initialize meals as empty array
 $meals = [];
 
-// Build SQL query
+// Build SQL query - CHANGED: Show ALL meals (available and unavailable)
 $sql = "SELECT m.*, s.FullName as SellerName, s.SellerID 
         FROM Meal m 
         JOIN Seller s ON m.SellerID = s.SellerID 
-        WHERE m.Availability = 'Available'";
+        WHERE 1=1"; // Changed from WHERE m.Availability = 'Available'
 
 $params = [];
 $types = "";
+
+// Add seller filter if specified
+if ($seller_id > 0) {
+    $sql .= " AND m.SellerID = ?";
+    $params[] = $seller_id;
+    $types .= "i";
+}
 
 // Add search filter
 if (!empty($search)) {
@@ -531,6 +542,57 @@ $conn->close();
             line-height: 1.6;
         }
         
+        /* NEW: Seller Filter Banner */
+        .seller-filter-banner {
+            background-color: #fff8e1;
+            border-left: 5px solid var(--primary);
+            padding: 15px 20px;
+            margin: 20px 0 30px;
+            border-radius: 8px;
+            display: <?php echo ($seller_id > 0 && !empty($seller_name)) ? 'flex' : 'none'; ?>;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .seller-filter-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .seller-filter-label {
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        .seller-filter-value {
+            background-color: var(--primary);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        
+        .clear-seller-filter {
+            background-color: transparent;
+            border: 2px solid var(--primary);
+            color: var(--primary);
+            padding: 8px 16px;
+            border-radius: 50px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .clear-seller-filter:hover {
+            background-color: rgba(230, 57, 70, 0.1);
+        }
+        
         /* Browse Controls - SIMPLER */
         .browse-controls {
             background-color: white;
@@ -740,6 +802,34 @@ $conn->close();
             font-size: 0.9rem;
         }
         
+        /* NEW: Not Available Badge */
+        .not-available-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background-color: var(--primary);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            z-index: 2;
+        }
+        
+        /* NEW: Meal Card Disabled State */
+        .meal-card.disabled {
+            opacity: 0.7;
+        }
+        
+        .meal-card.disabled:hover {
+            transform: none;
+            box-shadow: var(--shadow);
+        }
+        
+        .meal-card.disabled .meal-image img {
+            filter: grayscale(30%);
+        }
+        
         /* Meals Grid - UPDATED WITH RATINGS */
         .meals-grid-header {
             display: flex;
@@ -882,6 +972,16 @@ $conn->close();
             background-color: var(--primary-dark);
         }
         
+        .btn-order:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .btn-order:disabled:hover {
+            background-color: #ccc;
+        }
+        
         .btn-view-details {
             background-color: transparent;
             color: var(--primary);
@@ -981,10 +1081,10 @@ $conn->close();
             animation: fadeIn 0.5s ease forwards;
         }
         
-        /* Notification from homepage */
+        /* NOTIFICATION POSITION FIXED - MOVED LOWER */
         .notification {
             position: fixed;
-            top: 30px;
+            top: 100px; /* CHANGED: Lowered from 30px to 100px */
             right: 30px;
             background-color: var(--success);
             color: white;
@@ -1097,6 +1197,7 @@ $conn->close();
             border-radius: 15px;
             overflow: hidden;
             margin-bottom: 25px;
+            position: relative;
         }
         
         .meal-details-image img {
@@ -1213,6 +1314,12 @@ $conn->close();
         
         .btn-details-order:hover {
             background-color: var(--primary-dark);
+        }
+        
+        .btn-details-order:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            opacity: 0.6;
         }
         
         .btn-details-back {
@@ -1397,6 +1504,14 @@ $conn->close();
             .meal-details-image {
                 height: 250px;
             }
+            
+            /* Mobile notification adjustment */
+            .notification {
+                top: 80px;
+                right: 15px;
+                left: 15px;
+                max-width: none;
+            }
         }
         
         @media (max-width: 576px) {
@@ -1450,6 +1565,8 @@ $conn->close();
                 <div id="detailsContent" style="display: none;">
                     <div class="meal-details-image">
                         <img id="detailsImage" src="" alt="Meal Image">
+                        <!-- Not Available Badge in Modal -->
+                        <div id="modalNotAvailableBadge" class="not-available-badge" style="display: none;">Not Available</div>
                     </div>
                     
                     <div class="meal-details-grid">
@@ -1551,11 +1668,15 @@ $conn->close();
                 </div>
                 
                 <div class="user-actions">
-                    <!-- Cart icon with count -->
+                    <!-- Cart icon with count - FIXED: Only show badge if count > 0 -->
                     <a href="cart.php" class="cart-icon-link">
                         <div class="cart-icon">
                             <i class="fas fa-shopping-cart"></i>
-                            <span class="cart-count" id="cartCount"><?php echo $cart_count; ?></span>
+                            <?php if ($cart_count > 0): ?>
+                                <span class="cart-count" id="cartCount"><?php echo $cart_count; ?></span>
+                            <?php else: ?>
+                                <span class="cart-count" id="cartCount" style="display: none;">0</span>
+                            <?php endif; ?>
                         </div>
                     </a>
                     
@@ -1613,11 +1734,29 @@ $conn->close();
     <section class="hero-section">
         <div class="container">
             <div class="hero-content">
-                <h1 class="hero-title">Discover Delicious Homemade Meals</h1>
-                <p class="hero-subtitle">Explore authentic Filipino dishes and international cuisine prepared by passionate home cooks and small food entrepreneurs in your community.</p>
+                <?php if ($seller_id > 0 && !empty($seller_name)): ?>
+                    <h1 class="hero-title">Meals by <?php echo htmlspecialchars($seller_name); ?></h1>
+                    <p class="hero-subtitle">Explore all homemade meals from this seller. Discover their specialties and unique dishes.</p>
+                <?php else: ?>
+                    <h1 class="hero-title">Discover Delicious Homemade Meals</h1>
+                    <p class="hero-subtitle">Explore authentic Filipino dishes prepared by passionate home cooks and small food entrepreneurs in your community.</p>
+                <?php endif; ?>
             </div>
         </div>
     </section>
+
+    <!-- NEW: Seller Filter Banner -->
+    <div class="container">
+        <div class="seller-filter-banner" id="sellerFilterBanner">
+            <div class="seller-filter-info">
+                <span class="seller-filter-label">Showing meals from:</span>
+                <span class="seller-filter-value"><?php echo htmlspecialchars($seller_name); ?></span>
+            </div>
+            <button class="clear-seller-filter" onclick="clearSellerFilter()">
+                <i class="fas fa-times"></i> Clear Filter
+            </button>
+        </div>
+    </div>
 
     <!-- Browse Controls -->
     <section class="browse-controls">
@@ -1644,6 +1783,10 @@ $conn->close();
                     <input type="text" name="search" id="searchInput" placeholder="Search meals, sellers..." value="<?php echo htmlspecialchars($search); ?>">
                     <input type="hidden" name="sort" id="sortInput" value="<?php echo htmlspecialchars($sort); ?>">
                     <input type="hidden" name="category" id="categoryInput" value="<?php echo htmlspecialchars($category); ?>">
+                    <?php if ($seller_id > 0): ?>
+                        <input type="hidden" name="seller_id" id="sellerIdInput" value="<?php echo $seller_id; ?>">
+                        <input type="hidden" name="seller_name" id="sellerNameInput" value="<?php echo htmlspecialchars($seller_name); ?>">
+                    <?php endif; ?>
                 </form>
             </div>
         </div>
@@ -1660,6 +1803,10 @@ $conn->close();
             <form method="GET" action="browse-meals.php" id="filterForm">
                 <input type="hidden" name="sort" id="filterSort" value="<?php echo htmlspecialchars($sort); ?>">
                 <input type="hidden" name="search" id="filterSearch" value="<?php echo htmlspecialchars($search); ?>">
+                <?php if ($seller_id > 0): ?>
+                    <input type="hidden" name="seller_id" id="filterSellerId" value="<?php echo $seller_id; ?>">
+                    <input type="hidden" name="seller_name" id="filterSellerName" value="<?php echo htmlspecialchars($seller_name); ?>">
+                <?php endif; ?>
                 
                 <div class="category-options">
                     <div class="category-option">
@@ -1687,14 +1834,30 @@ $conn->close();
     <!-- Meals Grid -->
     <section class="container">
         <div class="meals-grid-header">
-            <h2>Available Meals</h2>
-            <div class="results-count">
-                <?php if (!empty($category) && $category !== 'all'): ?>
-                    Showing <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> meals in <span style="color: var(--primary); font-weight: 600;"><?php echo htmlspecialchars($category); ?></span>
-                <?php elseif (!empty($search)): ?>
-                    Showing <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> results for "<?php echo htmlspecialchars($search); ?>"
+            <h2>
+                <?php if ($seller_id > 0 && !empty($seller_name)): ?>
+                    <?php echo htmlspecialchars($seller_name); ?>'s Meals
                 <?php else: ?>
-                    <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> meals available
+                    Available Meals
+                <?php endif; ?>
+            </h2>
+            <div class="results-count">
+                <?php 
+                $availableCount = 0;
+                foreach ($meals as $meal) {
+                    if ($meal['Availability'] === 'Available') {
+                        $availableCount++;
+                    }
+                }
+                ?>
+                <?php if ($seller_id > 0 && !empty($seller_name)): ?>
+                    Showing <span style="color: var(--primary); font-weight: 600;"><?php echo $availableCount; ?></span> available meals out of <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> from this seller
+                <?php elseif (!empty($category) && $category !== 'all'): ?>
+                    Showing <span style="color: var(--primary); font-weight: 600;"><?php echo $availableCount; ?></span> available meals out of <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> in <span style="color: var(--primary); font-weight: 600;"><?php echo htmlspecialchars($category); ?></span>
+                <?php elseif (!empty($search)): ?>
+                    Showing <span style="color: var(--primary); font-weight: 600;"><?php echo $availableCount; ?></span> available meals out of <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> results for "<?php echo htmlspecialchars($search); ?>"
+                <?php else: ?>
+                    <span style="color: var(--primary); font-weight: 600;"><?php echo $availableCount; ?></span> available meals out of <span style="color: var(--primary); font-weight: 600;"><?php echo count($meals); ?></span> total meals
                 <?php endif; ?>
             </div>
         </div>
@@ -1708,11 +1871,17 @@ $conn->close();
                     $hasHalfStar = ($rating - $fullStars) >= 0.5;
                     $emptyStars = 5 - $fullStars - ($hasHalfStar ? 1 : 0);
                     $reviewCount = rand(5, 150);
+                    
+                    // Check if meal is available
+                    $isAvailable = $meal['Availability'] === 'Available';
                 ?>
-                    <div class="meal-card" data-meal-id="<?php echo $meal['MealID']; ?>">
+                    <div class="meal-card <?php echo !$isAvailable ? 'disabled' : ''; ?>" data-meal-id="<?php echo $meal['MealID']; ?>">
                         <div class="meal-image">
                             <img src="<?php echo htmlspecialchars($meal['ImagePath'] ? $meal['ImagePath'] : 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'); ?>" alt="<?php echo htmlspecialchars($meal['Title']); ?>">
                             <div class="meal-category"><?php echo htmlspecialchars($meal['Category']); ?></div>
+                            <?php if (!$isAvailable): ?>
+                                <div class="not-available-badge">Not Available</div>
+                            <?php endif; ?>
                         </div>
                         <div class="meal-info">
                             <div class="meal-header">
@@ -1745,8 +1914,12 @@ $conn->close();
                             </div>
                             <p class="meal-description"><?php echo htmlspecialchars(substr($meal['Description'], 0, 100)) . '...'; ?></p>
                             <div class="meal-actions">
-                                <button class="btn-order add-to-cart-btn" data-meal-id="<?php echo $meal['MealID']; ?>" data-meal-title="<?php echo htmlspecialchars($meal['Title']); ?>">
-                                    <i class="fas fa-shopping-cart"></i> Add to Cart
+                                <button class="btn-order add-to-cart-btn" 
+                                        data-meal-id="<?php echo $meal['MealID']; ?>" 
+                                        data-meal-title="<?php echo htmlspecialchars($meal['Title']); ?>"
+                                        <?php if (!$isAvailable): ?>disabled<?php endif; ?>>
+                                    <i class="fas fa-shopping-cart"></i> 
+                                    <?php echo $isAvailable ? 'Add to Cart' : 'Not Available'; ?>
                                 </button>
                                 <button class="btn-view-details view-details-btn" data-meal-id="<?php echo $meal['MealID']; ?>">
                                     <i class="fas fa-eye"></i> View Details
@@ -1762,7 +1935,9 @@ $conn->close();
                     </div>
                     <h3 style="color: var(--gray); margin-bottom: 15px;">No meals found</h3>
                     <p style="color: var(--gray); margin-bottom: 25px;">
-                        <?php if (!empty($category) && $category !== 'all'): ?>
+                        <?php if ($seller_id > 0 && !empty($seller_name)): ?>
+                            <?php echo htmlspecialchars($seller_name); ?> doesn't have any meals listed yet.
+                        <?php elseif (!empty($category) && $category !== 'all'): ?>
                             No meals found in <strong><?php echo htmlspecialchars($category); ?></strong> category.
                         <?php elseif (!empty($search)): ?>
                             No meals found for "<?php echo htmlspecialchars($search); ?>"
@@ -1829,6 +2004,7 @@ $conn->close();
         // Current meal ID for details modal - FROM HOMEPAGE
         let currentMealId = null;
         let currentMealTitle = null;
+        let currentMealAvailable = true;
         
         // Function to open meal details modal - FROM HOMEPAGE
         function openMealDetails(mealId) {
@@ -1859,6 +2035,7 @@ $conn->close();
                 if (data.success) {
                     const meal = data.meal;
                     currentMealTitle = meal.Title;
+                    currentMealAvailable = meal.Availability === 'Available';
                     
                     // Update modal content
                     document.getElementById('detailsTitle').textContent = meal.Title;
@@ -1890,14 +2067,23 @@ $conn->close();
                     // Set availability
                     const availabilityStatus = document.getElementById('availabilityStatus');
                     const availabilityIcon = document.getElementById('availabilityIcon');
-                    if (meal.Availability === 'Available') {
+                    const notAvailableBadge = document.getElementById('modalNotAvailableBadge');
+                    const addToCartBtn = document.querySelector('.add-to-cart-details-btn');
+                    
+                    if (currentMealAvailable) {
                         availabilityStatus.textContent = 'Available';
                         availabilityStatus.className = 'status status-available';
                         availabilityIcon.style.color = '#2a9d8f';
+                        notAvailableBadge.style.display = 'none';
+                        addToCartBtn.disabled = false;
+                        addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Add to Cart';
                     } else {
                         availabilityStatus.textContent = 'Not Available';
                         availabilityStatus.className = 'status status-not-available';
                         availabilityIcon.style.color = '#e63946';
+                        notAvailableBadge.style.display = 'block';
+                        addToCartBtn.disabled = true;
+                        addToCartBtn.innerHTML = '<i class="fas fa-ban"></i> Not Available';
                     }
                     
                     // Set rating
@@ -1965,13 +2151,25 @@ $conn->close();
             document.getElementById('mealDetailsModal').classList.remove('active');
             currentMealId = null;
             currentMealTitle = null;
+            currentMealAvailable = true;
         }
         
         // Function to add to cart from details modal - FROM HOMEPAGE
         function addToCartFromDetails() {
-            if (currentMealId && currentMealTitle) {
+            if (currentMealId && currentMealTitle && currentMealAvailable) {
                 addToCart(currentMealId, currentMealTitle);
+            } else if (!currentMealAvailable) {
+                showNotification('This meal is not available for purchase', 'error');
             }
+        }
+        
+        // Function to clear seller filter
+        function clearSellerFilter() {
+            // Remove seller filter from URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete('seller_id');
+            url.searchParams.delete('seller_name');
+            window.location.href = url.toString();
         }
         
         // Close modal when clicking outside - FROM HOMEPAGE
@@ -1985,21 +2183,20 @@ $conn->close();
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Browse Meals page loaded - Initializing cart...');
             
-            // Initialize cart count display - FORCE SHOW BADGE IF COUNT > 0
+            // Show/hide seller filter banner
+            const sellerFilterBanner = document.getElementById('sellerFilterBanner');
+            if (sellerFilterBanner) {
+                const shouldShow = sellerFilterBanner.style.display === 'flex';
+                console.log('Seller filter banner should show:', shouldShow);
+            }
+            
+            // Initialize cart count display - CHECK IF BADGE EXISTS
             const cartCountElement = document.getElementById('cartCount');
             if (cartCountElement) {
-                const cartCount = parseInt(cartCountElement.textContent) || 0;
-                console.log('Initial cart count from PHP:', cartCount);
-                
-                if (cartCount > 0) {
-                    // FORCE THE BADGE TO BE VISIBLE
-                    cartCountElement.style.display = 'flex';
-                    cartCountElement.style.visibility = 'visible';
-                    cartCountElement.style.opacity = '1';
-                    console.log('Cart badge should be visible (count > 0)');
-                } else {
-                    cartCountElement.style.display = 'none';
-                }
+                console.log('Cart count element found');
+                // The badge is already properly set by PHP
+            } else {
+                console.log('Cart count element not found - this is expected if cart is empty');
             }
             
             // Setup View Details buttons - NEW
@@ -2051,6 +2248,11 @@ $conn->close();
                 newButton.addEventListener('click', function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    
+                    if (this.disabled) {
+                        showNotification('This meal is not available for purchase', 'error');
+                        return;
+                    }
                     
                     const mealId = this.getAttribute('data-meal-id');
                     const mealTitle = this.getAttribute('data-meal-title');
@@ -2187,7 +2389,7 @@ $conn->close();
             });
         }
 
-        // Show notification function
+        // Show notification function - FIXED POSITION
         function showNotification(message, type = 'success') {
             // Remove existing notification
             const existingNotification = document.querySelector('.notification');
@@ -2205,7 +2407,11 @@ $conn->close();
             
             document.body.appendChild(notification);
             
-            // Trigger animation
+            // Set initial position (already at top: 100px from CSS)
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateY(-20px)';
+            
+            // Animate in
             setTimeout(() => {
                 notification.style.opacity = '1';
                 notification.style.transform = 'translateY(0)';
@@ -2223,18 +2429,32 @@ $conn->close();
             }, 3000);
         }
 
-        // Update cart count with animation - SIMPLIFIED AND FIXED
+        // Update cart count with animation - FIXED VERSION
         function updateCartCount() {
             console.log('Updating cart count...');
             const cartCountElement = document.getElementById('cartCount');
             
             if (!cartCountElement) {
-                console.error('Cart count element not found!');
-                return;
+                console.log('Cart count element not found, creating one...');
+                // Create the badge if it doesn't exist
+                const cartIcon = document.querySelector('.cart-icon');
+                if (cartIcon) {
+                    const newBadge = document.createElement('span');
+                    newBadge.className = 'cart-count';
+                    newBadge.id = 'cartCount';
+                    newBadge.textContent = '1';
+                    newBadge.style.display = 'flex'; // Make sure it's visible
+                    cartIcon.appendChild(newBadge);
+                } else {
+                    return; // Exit if no cart icon found
+                }
             }
             
+            // Get reference again (might be newly created)
+            const badge = document.getElementById('cartCount');
+            
             // Add bounce animation
-            cartCountElement.style.animation = 'bounce 0.5s ease';
+            badge.style.animation = 'bounce 0.5s ease';
             
             // Fetch updated cart count from server
             fetch('get-cart-count.php')
@@ -2252,16 +2472,13 @@ $conn->close();
                         console.log('New cart count:', newCount);
                         
                         // Update the badge text
-                        cartCountElement.textContent = newCount;
+                        badge.textContent = newCount;
                         
-                        // FORCE SHOW THE BADGE if count > 0
+                        // Show or hide badge based on count
                         if (newCount > 0) {
-                            cartCountElement.style.display = 'flex';
-                            cartCountElement.style.visibility = 'visible';
-                            cartCountElement.style.opacity = '1';
-                            console.log('Cart badge set to VISIBLE');
+                            badge.style.display = 'flex';
                         } else {
-                            cartCountElement.style.display = 'none';
+                            badge.style.display = 'none';
                         }
                     } else {
                         console.error('Failed to get cart count:', data.message);
@@ -2273,7 +2490,7 @@ $conn->close();
                 .finally(() => {
                     // Reset animation
                     setTimeout(() => {
-                        cartCountElement.style.animation = '';
+                        badge.style.animation = '';
                     }, 500);
                 });
         }
@@ -2292,6 +2509,7 @@ $conn->close();
             
             // Save original state
             const originalHTML = button.innerHTML;
+            const originalDisabled = button.disabled;
             
             // Show loading
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
@@ -2319,7 +2537,7 @@ $conn->close();
                 
                 // Restore button
                 button.innerHTML = originalHTML;
-                button.disabled = false;
+                button.disabled = originalDisabled;
                 
                 if (data.success) {
                     showNotification(`"${mealTitle}" added to cart!`);
@@ -2332,7 +2550,7 @@ $conn->close();
             .catch(error => {
                 console.error('Error:', error);
                 button.innerHTML = originalHTML;
-                button.disabled = false;
+                button.disabled = originalDisabled;
                 showNotification('Network error', 'error');
             });
         }

@@ -25,7 +25,7 @@ if ($conn->connect_error) {
 
 $seller_id = $_SESSION['user_id'];
 
-// Get pending orders count
+// Get pending orders count - COUNTING DISTINCT ORDERS
 $pending_count = 0;
 $pending_sql = "SELECT COUNT(DISTINCT o.OrderID) as pending_count
                 FROM `Order` o
@@ -44,11 +44,31 @@ if ($stmt) {
     $stmt->close();
 }
 
+// Also get count of items in pending orders for debugging/verification
+$pending_items_sql = "SELECT COUNT(*) as pending_items
+                     FROM OrderDetails od
+                     JOIN Meal m ON od.MealID = m.MealID
+                     JOIN `Order` o ON od.OrderID = o.OrderID
+                     WHERE m.SellerID = ? AND o.Status = 'Pending'";
+$stmt2 = $conn->prepare($pending_items_sql);
+$pending_items = 0;
+if ($stmt2) {
+    $stmt2->bind_param("i", $seller_id);
+    $stmt2->execute();
+    $items_result = $stmt2->get_result();
+    if ($items_result) {
+        $items_data = $items_result->fetch_assoc();
+        $pending_items = $items_data['pending_items'] ?: 0;
+    }
+    $stmt2->close();
+}
+
 $conn->close();
 
 header('Content-Type: application/json');
 echo json_encode([
     'success' => true,
-    'pending_count' => $pending_count
+    'pending_count' => $pending_count,
+    'pending_items' => $pending_items
 ]);
 ?>

@@ -37,6 +37,14 @@ if (!$seller) {
     exit();
 }
 
+// Extract seller information for display
+$seller_name = htmlspecialchars($seller['FullName'] ?? 'Seller');
+$seller_email = htmlspecialchars($seller['Email'] ?? '');
+$seller_image = htmlspecialchars($seller['ImagePath'] ?? ''); // Using ImagePath column
+
+// Get first letter for profile image fallback
+$initial = !empty($seller_name) ? strtoupper(substr($seller_name, 0, 1)) : 'S';
+
 // Get date range parameters
 $date_range = isset($_GET['date_range']) ? $_GET['date_range'] : 'this_month';
 $custom_from = isset($_GET['custom_from']) ? $_GET['custom_from'] : '';
@@ -297,6 +305,24 @@ if ($customer_result) {
 }
 $customer_stmt->close();
 
+// Handle export requests
+if (isset($_GET['export'])) {
+    $export_type = $_GET['export'];
+    $date_range_param = isset($_GET['date_range']) ? $_GET['date_range'] : 'this_month';
+    $custom_from_param = isset($_GET['custom_from']) ? $_GET['custom_from'] : '';
+    $custom_to_param = isset($_GET['custom_to']) ? $_GET['custom_to'] : '';
+    
+    // Include export functionality
+    require_once 'export-functions.php';
+    
+    if ($export_type == 'excel') {
+        exportToExcel($seller_id, $start_date, $end_date, $seller['FullName'], $date_range_param, $conn);
+    } elseif ($export_type == 'pdf') {
+        exportToPDF($seller_id, $start_date, $end_date, $seller['FullName'], $date_range_param, $conn);
+    }
+    exit();
+}
+
 $conn->close();
 ?>
 
@@ -476,7 +502,7 @@ $conn->close();
             }
         }
         
-        /* Profile Dropdown */
+        /* Profile Dropdown - UPDATED */
         .profile-dropdown {
             position: relative;
         }
@@ -485,6 +511,7 @@ $conn->close();
             width: 45px;
             height: 45px;
             border-radius: 50%;
+            border: 2px solid var(--primary-dark);
             background-color: var(--primary);
             display: flex;
             justify-content: center;
@@ -500,6 +527,13 @@ $conn->close();
         .user-profile:hover {
             background-color: var(--primary-dark);
             transform: scale(1.05);
+        }
+
+        .user-profile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .dropdown-menu {
@@ -544,6 +578,14 @@ $conn->close();
             font-weight: 700;
             font-size: 1.2rem;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .user-initial img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .user-details {
@@ -975,6 +1017,52 @@ $conn->close();
         .btn-sm {
             padding: 8px 15px;
             font-size: 0.9rem;
+        }
+        
+        /* Export Options */
+        .export-options {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            padding: 10px;
+            z-index: 100;
+            display: none;
+            min-width: 200px;
+        }
+        
+        .export-options.show {
+            display: block;
+            animation: fadeIn 0.2s ease;
+        }
+        
+        .export-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 15px;
+            color: var(--dark);
+            text-decoration: none;
+            transition: var(--transition);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .export-option:hover {
+            background-color: var(--light-gray);
+            color: var(--primary);
+        }
+        
+        .export-option i {
+            width: 20px;
+            text-align: center;
+            color: var(--gray);
+        }
+        
+        .export-option:hover i {
+            color: var(--primary);
         }
         
         /* Summary Stats */
@@ -1426,24 +1514,31 @@ $conn->close();
                 <!-- Profile dropdown -->
                 <div class="profile-dropdown">
                     <div class="user-profile" id="profileToggle">
-                        <?php echo strtoupper(substr($seller['FullName'], 0, 1)); ?>
+                        <?php if (!empty($seller_image)): ?>
+                            <img src="<?php echo $seller_image; ?>" alt="<?php echo $seller_name; ?>">
+                        <?php else: ?>
+                            <?php echo $initial; ?>
+                        <?php endif; ?>
                     </div>
                     <div class="dropdown-menu" id="dropdownMenu">
                         <div class="dropdown-header">
                             <div class="user-info">
-                                <div class="user-initial"><?php echo strtoupper(substr($seller['FullName'], 0, 1)); ?></div>
+                                <div class="user-initial">
+                                    <?php if (!empty($seller_image)): ?>
+                                        <img src="<?php echo $seller_image; ?>" alt="<?php echo $seller_name; ?>">
+                                    <?php else: ?>
+                                        <?php echo $initial; ?>
+                                    <?php endif; ?>
+                                </div>
                                 <div class="user-details">
-                                    <div class="user-name"><?php echo htmlspecialchars($seller['FullName']); ?></div>
-                                    <div class="user-email"><?php echo htmlspecialchars($seller['Email']); ?></div>
+                                    <div class="user-name"><?php echo $seller_name; ?></div>
+                                    <div class="user-email"><?php echo $seller_email; ?></div>
                                 </div>
                             </div>
                         </div>
                         <div class="dropdown-divider"></div>
                         <a href="seller-profile.php" class="dropdown-item">
                             <i class="fas fa-user"></i> Seller Profile
-                        </a>
-                        <a href="seller-settings.php" class="dropdown-item">
-                            <i class="fas fa-cog"></i> Store Settings
                         </a>
                         <div class="dropdown-divider"></div>
                         <a href="#" class="dropdown-item logout" id="logoutLink">
@@ -1558,9 +1653,19 @@ $conn->close();
                     <button type="submit" class="btn btn-primary">
                         <i class="fas fa-filter"></i> Apply Range
                     </button>
-                    <button type="button" class="btn btn-export" onclick="exportSalesReport()">
-                        <i class="fas fa-download"></i> Export Report
-                    </button>
+                    <div style="position: relative;">
+                        <button type="button" class="btn btn-export" onclick="toggleExportOptions()">
+                            <i class="fas fa-download"></i> Export Report
+                        </button>
+                        <div class="export-options" id="exportOptions">
+                            <a href="#" class="export-option" onclick="exportReport('excel')">
+                                <i class="fas fa-file-excel"></i> Export as Excel
+                            </a>
+                            <a href="#" class="export-option" onclick="exportReport('pdf')">
+                                <i class="fas fa-file-pdf"></i> Export as PDF
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </form>
@@ -1835,6 +1940,7 @@ $conn->close();
     const notificationToggle = document.getElementById('notificationToggle');
     const notificationModal = document.getElementById('notificationModal');
     const closeNotification = document.getElementById('closeNotification');
+    const exportOptions = document.getElementById('exportOptions');
 
     // Toggle profile dropdown
     profileToggle.addEventListener('click', function(e) {
@@ -1847,7 +1953,30 @@ $conn->close();
         if (!profileToggle.contains(e.target) && !dropdownMenu.contains(e.target)) {
             dropdownMenu.classList.remove('show');
         }
+        if (!e.target.closest('.export-options') && !e.target.closest('.btn-export')) {
+            exportOptions.classList.remove('show');
+        }
     });
+
+    // Toggle export options
+    function toggleExportOptions() {
+        exportOptions.classList.toggle('show');
+    }
+
+    // Export report
+    function exportReport(type) {
+        const dateRange = document.getElementById('date_range').value;
+        const customFrom = document.getElementById('custom_from').value;
+        const customTo = document.getElementById('custom_to').value;
+        
+        let url = `seller-sales.php?export=${type}&date_range=${dateRange}`;
+        
+        if (customFrom) url += `&custom_from=${customFrom}`;
+        if (customTo) url += `&custom_to=${customTo}`;
+        
+        window.location.href = url;
+        exportOptions.classList.remove('show');
+    }
 
     // Toggle notification modal
     notificationToggle.addEventListener('click', function(e) {
@@ -1927,7 +2056,7 @@ $conn->close();
                     Confirm Logout
                 </h3>
                 <p style="color: var(--gray); font-size: 1rem;">
-                    Are you sure you want to logout from Seller Dashboard?
+                    Are you sure you want to logout?
                 </p>
             </div>
             <div style="display: flex; gap: 15px; justify-content: center;">
@@ -2029,15 +2158,6 @@ $conn->close();
             });
         }
     });
-
-    // Export function
-    function exportSalesReport() {
-        showNotification('Preparing sales report for download...', 'success');
-        // In a real implementation, this would trigger a server-side export
-        setTimeout(() => {
-            showNotification('Report generated! Starting download...', 'success');
-        }, 1500);
-    }
 
     // Initialize Charts
     document.addEventListener('DOMContentLoaded', function() {

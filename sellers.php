@@ -598,7 +598,7 @@ $conn->close();
         }
         
         .seller-image {
-            height: 200px;
+            height: 300px;
             overflow: hidden;
             position: relative;
         }
@@ -1210,12 +1210,12 @@ $conn->close();
                                 <?php endif; ?>
                                 
                                 <div class="seller-actions">
-                                    <button class="btn btn-primary" onclick="viewSellerMeals(<?php echo $seller['SellerID']; ?>)">
+                                    <button class="btn btn-primary" onclick="viewSellerMeals(<?php echo $seller['SellerID']; ?>, '<?php echo addslashes($seller['FullName']); ?>')">
                                         <i class="fas fa-utensils"></i> View Meals
                                     </button>
-                                    <button class="btn btn-outline" onclick="contactSeller(<?php echo $seller['SellerID']; ?>)">
-                                        <i class="fas fa-comment"></i> Contact
-                                    </button>
+                                    <button class="btn btn-outline">
+    <i class="fas fa-comment"></i> Contact
+</button>
                                 </div>
                             </div>
                         </div>
@@ -1238,15 +1238,6 @@ $conn->close();
             </div>
         </div>
         
-        <!-- Become Seller CTA -->
-        <div class="become-seller-cta">
-            <h3>Want to Share Your Cooking?</h3>
-            <p>Join our community of home cooks and food entrepreneurs. Share your authentic Filipino recipes and earn from your passion for cooking!</p>
-            <button class="btn-white" onclick="window.location.href='become-seller.php'">
-                <i class="fas fa-store"></i> Become a Seller
-            </button>
-        </div>
-    </section>
 
     <!-- Footer -->
     <footer>
@@ -1469,9 +1460,21 @@ $conn->close();
             }, 500);
         }
 
-        // Seller actions
-        function viewSellerMeals(sellerId) {
-            window.location.href = `browse-meals.php?seller=${sellerId}`;
+        // Seller actions - UPDATED FUNCTIONS
+        function viewSellerMeals(sellerId, sellerName) {
+            // Add loading state to button
+            const button = event.target;
+            const originalHTML = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+            button.disabled = true;
+            
+            // URL encode the seller name for safety
+            const encodedName = encodeURIComponent(sellerName);
+            
+            // Redirect to browse-meals.php with seller filter
+            setTimeout(() => {
+                window.location.href = `browse-meals.php?seller_id=${sellerId}&seller_name=${encodedName}`;
+            }, 300);
         }
 
         function contactSeller(sellerId) {

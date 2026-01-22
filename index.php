@@ -59,10 +59,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $sql = "SELECT * FROM Customer WHERE Email = ?";
             $redirect_page = 'homepage.php';
             $id_field = 'CustomerID';
+            $wrong_user_type_message = 'You do not have a customer account. Please login as seller or create a customer account.';
         } else if ($user_type === 'seller') {
             $sql = "SELECT * FROM Seller WHERE Email = ?";
             $redirect_page = 'seller-homepage.php';
             $id_field = 'SellerID';
+            $wrong_user_type_message = 'You do not have a seller account. Please login as customer or create a seller account.';
         } else {
             echo json_encode([
                 'success' => false,
@@ -99,10 +101,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 ]);
             }
         } else {
-            echo json_encode([
-                'success' => false,
-                'message' => 'Invalid email or password'
-            ]);
+            // Check if the email exists in the OTHER table
+            $other_table = ($user_type === 'customer') ? 'Seller' : 'Customer';
+            $check_other_sql = "SELECT Email FROM $other_table WHERE Email = ?";
+            $check_stmt = $conn->prepare($check_other_sql);
+            $check_stmt->bind_param("s", $email);
+            $check_stmt->execute();
+            $check_stmt->store_result();
+            
+            if ($check_stmt->num_rows > 0) {
+                // Email exists in the other table
+                echo json_encode([
+                    'success' => false,
+                    'message' => $wrong_user_type_message
+                ]);
+            } else {
+                // Email doesn't exist in any table
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Invalid email or password'
+                ]);
+            }
+            $check_stmt->close();
         }
         $stmt->close();
         $conn->close();
@@ -278,21 +298,97 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
 }
 
 // If not an AJAX request, continue to display the page
-// Get featured meals from database
+// Get featured meals from database - OPTIMIZED FOR RANDOM BY SELLER
 $featured_meals = [];
 
-// SIMPLIFIED SQL QUERY
+// OPTION 1: Get one random meal from each seller first (ensures variety)
 $sql = "SELECT m.*, s.FullName as SellerName 
-        FROM Meal m 
-        JOIN Seller s ON m.SellerID = s.SellerID 
-        WHERE m.Availability = 'Available' 
-        ORDER BY m.CreatedAt DESC 
+        FROM (
+            SELECT MealID, SellerID, 
+                   ROW_NUMBER() OVER (PARTITION BY SellerID ORDER BY RAND()) as rn
+            FROM Meal 
+            WHERE Availability = 'Available'
+        ) as ranked
+        JOIN Meal m ON ranked.MealID = m.MealID
+        JOIN Seller s ON m.SellerID = s.SellerID
+        WHERE ranked.rn = 1
+        ORDER BY RAND()
         LIMIT 6";
 
 $result = $conn->query($sql);
 if ($result && $result->num_rows > 0) {
     while($row = $result->fetch_assoc()) {
         $featured_meals[] = $row;
+    }
+}
+
+// OPTION 2: If we didn't get 6 meals from different sellers, fill with additional random meals
+if (count($featured_meals) < 6 && count($featured_meals) > 0) {
+    $needed = 6 - count($featured_meals);
+    $meal_ids = array_column($featured_meals, 'MealID');
+    
+    // Prepare placeholders for the NOT IN clause
+    $placeholders = implode(',', array_fill(0, count($meal_ids), '?'));
+    
+    if (count($meal_ids) > 0) {
+        $fill_sql = "SELECT m.*, s.FullName as SellerName 
+                    FROM Meal m 
+                    JOIN Seller s ON m.SellerID = s.SellerID 
+                    WHERE m.Availability = 'Available' 
+                    AND m.MealID NOT IN ($placeholders)
+                    ORDER BY RAND()
+                    LIMIT ?";
+        
+        // Prepare statement
+        $fill_stmt = $conn->prepare($fill_sql);
+        
+        // Build parameters: all meal IDs + the limit
+        $param_types = str_repeat('i', count($meal_ids)) . 'i';
+        $params = array_merge($meal_ids, [$needed]);
+        
+        // Bind parameters
+        $fill_stmt->bind_param($param_types, ...$params);
+        $fill_stmt->execute();
+        $fill_result = $fill_stmt->get_result();
+        
+        if ($fill_result && $fill_result->num_rows > 0) {
+            while($row = $fill_result->fetch_assoc()) {
+                $featured_meals[] = $row;
+            }
+        }
+        $fill_stmt->close();
+    } else {
+        // Simple fallback if no meals in first query
+        $fill_sql = "SELECT m.*, s.FullName as SellerName 
+                    FROM Meal m 
+                    JOIN Seller s ON m.SellerID = s.SellerID 
+                    WHERE m.Availability = 'Available' 
+                    ORDER BY RAND()
+                    LIMIT 6";
+        
+        $fill_result = $conn->query($fill_sql);
+        if ($fill_result && $fill_result->num_rows > 0) {
+            while($row = $fill_result->fetch_assoc()) {
+                $featured_meals[] = $row;
+            }
+        }
+    }
+}
+
+// OPTION 3: Final fallback - if still no meals, use the original simple query
+if (count($featured_meals) == 0) {
+    $sql = "SELECT m.*, s.FullName as SellerName 
+            FROM Meal m 
+            JOIN Seller s ON m.SellerID = s.SellerID 
+            WHERE m.Availability = 'Available' 
+            ORDER BY RAND()
+            LIMIT 6";
+    
+    $result = $conn->query($sql);
+    if ($result && $result->num_rows > 0) {
+        while($row = $result->fetch_assoc()) {
+            $featured_meals[] = $row;
+        }
     }
 }
 
@@ -1681,6 +1777,12 @@ $conn->close();
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Hide Edge's built-in password reveal button */
+            input[type="password"]::-ms-reveal {
+                display: none !important;
+        }
+
     </style>
 </head>
 <body>
@@ -2032,7 +2134,7 @@ $conn->close();
                     <i class="fas fa-calendar-check"></i>
                 </div>
                 <h3>Flexible Orders</h3>
-                <p>Order immediately or schedule for holidays and special occasions.</p>
+                <p>Allows customers to place orders conveniently with flexible meal choices.</p>
             </div>
             <div class="feature-item">
                 <div class="feature-icon">
@@ -2053,7 +2155,7 @@ $conn->close();
                         <i class="fas fa-utensils"></i>
                         LutongBahay
                     </div>
-                    <p>Connecting small food entrepreneurs with customers online. Supporting Filipino home cooks and food businesses since 2015.</p>
+                    <p>Connecting small food entrepreneurs with customers online. Supporting Filipino home cooks and food businesses since 2024.</p>
                 </div>
                 
                 <div class="footer-links">
@@ -2594,6 +2696,14 @@ $conn->close();
             }
         }
         
+        // Add this function to switch user type in login form
+        function switchUserType(newType) {
+            selectUserType(newType, 'login');
+            
+            // Clear the error message
+            document.getElementById('loginError').classList.remove('active');
+        }
+        
         // Toggle password visibility
         function togglePassword(inputId) {
             const input = document.getElementById(inputId);
@@ -2758,7 +2868,34 @@ $conn->close();
                         window.location.href = result.redirect;
                     }, 1000);
                 } else {
-                    errorDiv.textContent = result.message || 'Login failed';
+                    // Check if it's a "wrong account type" error
+                    const wrongTypeMessages = [
+                        'You do not have a customer account.',
+                        'You do not have a seller account.'
+                    ];
+                    
+                    const isWrongTypeError = wrongTypeMessages.some(msg => 
+                        result.message.includes(msg)
+                    );
+                    
+                    if (isWrongTypeError) {
+                        // Show message with option to switch
+                        const userType = document.getElementById('loginUserType').value;
+                        const otherType = userType === 'customer' ? 'seller' : 'customer';
+                        const otherTypeDisplay = otherType === 'customer' ? 'Customer' : 'Seller';
+                        
+                        errorDiv.innerHTML = `
+                            ${result.message}<br><br>
+                            <button type="button" class="simple-btn-link" 
+                                    onclick="switchUserType('${otherType}')" 
+                                    style="color: var(--primary); font-weight: 600;">
+                                Switch to ${otherTypeDisplay} login
+                            </button>
+                        `;
+                    } else {
+                        errorDiv.textContent = result.message || 'Login failed';
+                    }
+                    
                     errorDiv.classList.add('active');
                     submitBtn.innerHTML = originalText;
                     submitBtn.disabled = false;
@@ -2840,18 +2977,27 @@ $conn->close();
                 const result = await response.json();
                 
                 if (result.success) {
-                    successDiv.textContent = result.message;
-                    successDiv.classList.add('active');
+                    // DIRECTLY OPEN LOGIN MODAL WITH SUCCESS MESSAGE
+                    closeModal('signupModal');
                     
-                    // Close modal after 1.5 seconds
-                    setTimeout(() => {
-                        closeModal('signupModal');
-                    }, 1500);
+                    // Open login modal with the same user type
+                    const userType = document.getElementById('signupUserType').value;
+                    openLoginModal(userType);
                     
-                    // Open login modal after 2 seconds
+                    // Show success message in login modal
                     setTimeout(() => {
-                        openLoginModal(document.getElementById('signupUserType').value);
-                    }, 2000);
+                        const loginSuccessDiv = document.getElementById('loginSuccess');
+                        loginSuccessDiv.textContent = 'Account created successfully! You can now login with your credentials.';
+                        loginSuccessDiv.classList.add('active');
+                        
+                        // Pre-fill the email in login form
+                        const email = document.getElementById('signupEmail').value;
+                        document.getElementById('loginEmail').value = email;
+                        
+                        // Reset signup form
+                        document.getElementById('signupForm').reset();
+                        resetPasswordStrength();
+                    }, 300);
                     
                     submitBtn.innerHTML = originalText;
                     submitBtn.disabled = false;

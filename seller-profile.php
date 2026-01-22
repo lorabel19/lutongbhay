@@ -112,48 +112,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     }
 }
 
-// Handle password change
-$password_success = false;
-$password_error = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
-    $current_password = $_POST['current_password'];
-    $new_password = $_POST['new_password'];
-    $confirm_password = $_POST['confirm_password'];
-    
-    // Get current password hash from database
-    $password_sql = "SELECT Password FROM Seller WHERE SellerID = ?";
-    $stmt = $conn->prepare($password_sql);
-    $stmt->bind_param("i", $seller_id);
-    $stmt->execute();
-    $password_result = $stmt->get_result();
-    $password_data = $password_result->fetch_assoc();
-    $stmt->close();
-    
-    if (!$password_data) {
-        $password_error = "User not found.";
-    } elseif (!password_verify($current_password, $password_data['Password'])) {
-        $password_error = "Current password is incorrect.";
-    } elseif (strlen($new_password) < 8) {
-        $password_error = "New password must be at least 8 characters long.";
-    } elseif ($new_password !== $confirm_password) {
-        $password_error = "New passwords do not match.";
-    } else {
-        // Update password
-        $new_password_hash = password_hash($new_password, PASSWORD_DEFAULT);
-        $update_password_sql = "UPDATE Seller SET Password = ? WHERE SellerID = ?";
-        $stmt = $conn->prepare($update_password_sql);
-        $stmt->bind_param("si", $new_password_hash, $seller_id);
-        
-        if ($stmt->execute()) {
-            $password_success = true;
-        } else {
-            $password_error = "Failed to update password. Please try again.";
-        }
-        $stmt->close();
-    }
-}
-
 // Handle profile picture upload
 $upload_success = false;
 $upload_error = '';
@@ -228,6 +186,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_picture'])) {
     $stmt->close();
 }
 
+// Handle password change
+$password_success = false;
+$password_error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
+    $current_password = trim($_POST['current_password']);
+    $new_password = trim($_POST['new_password']);
+    $confirm_password = trim($_POST['confirm_password']);
+    
+    // Validation
+    if (empty($current_password) || empty($new_password) || empty($confirm_password)) {
+        $password_error = "All password fields are required.";
+    } elseif ($new_password !== $confirm_password) {
+        $password_error = "New password and confirmation do not match.";
+    } elseif (strlen($new_password) < 8) {
+        $password_error = "New password must be at least 8 characters long.";
+    } else {
+        // Verify current password
+        if (password_verify($current_password, $seller['Password'])) {
+            // Hash new password
+            $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+            
+            // Update password in database
+            $update_password_sql = "UPDATE Seller SET Password = ? WHERE SellerID = ?";
+            $stmt = $conn->prepare($update_password_sql);
+            $stmt->bind_param("si", $hashed_password, $seller_id);
+            
+            if ($stmt->execute()) {
+                $password_success = true;
+                // Show success message instead of auto-logout
+                // Continue session so user can see the success message
+            } else {
+                $password_error = "Failed to change password. Please try again.";
+            }
+            $stmt->close();
+        } else {
+            $password_error = "Current password is incorrect.";
+        }
+    }
+}
+
+// Handle account deletion
+$delete_error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_account'])) {
+    $confirm_password = trim($_POST['confirm_delete_password']);
+    $confirmation_text = trim($_POST['confirmation_text']);
+    
+    // Validation
+    if (empty($confirm_password)) {
+        $delete_error = "Please enter your password to confirm account deletion.";
+    } elseif ($confirmation_text !== "DELETE MY ACCOUNT") {
+        $delete_error = "Please type 'DELETE MY ACCOUNT' exactly as shown to confirm.";
+    } elseif (!password_verify($confirm_password, $seller['Password'])) {
+        $delete_error = "Incorrect password. Account deletion cancelled.";
+    } else {
+        // Delete profile picture if exists
+        if ($seller_image && file_exists($seller_image)) {
+            unlink($seller_image);
+        }
+        
+        // Delete seller from database
+        $delete_sql = "DELETE FROM Seller WHERE SellerID = ?";
+        $stmt = $conn->prepare($delete_sql);
+        $stmt->bind_param("i", $seller_id);
+        
+        if ($stmt->execute()) {
+            // Destroy session
+            session_destroy();
+            // Redirect to homepage with deletion message
+            header('Location: index.php?account_deleted=1');
+            exit();
+        } else {
+            $delete_error = "Failed to delete account. Please try again or contact support.";
+        }
+        $stmt->close();
+    }
+}
+
 // Get pending orders count
 $pending_count = 0;
 $pending_sql = "SELECT COUNT(DISTINCT o.OrderID) as pending_count
@@ -238,11 +275,12 @@ $pending_sql = "SELECT COUNT(DISTINCT o.OrderID) as pending_count
 $stmt = $conn->prepare($pending_sql);
 if ($stmt) {
     $stmt->bind_param("i", $seller_id);
-    $stmt->execute();
-    $pending_result = $stmt->get_result();
-    if ($pending_result) {
-        $pending_data = $pending_result->fetch_assoc();
-        $pending_count = $pending_data['pending_count'] ?: 0;
+    if ($stmt->execute()) {
+        $pending_result = $stmt->get_result();
+        if ($pending_result && $pending_result->num_rows > 0) {
+            $pending_data = $pending_result->fetch_assoc();
+            $pending_count = $pending_data['pending_count'] ?: 0;
+        }
     }
     $stmt->close();
 }
@@ -425,7 +463,7 @@ $conn->close();
             }
         }
         
-        /* Profile Dropdown */
+        /* Profile Dropdown - UPDATED WITH CIRCULAR IMAGE STYLES */
         .profile-dropdown {
             position: relative;
         }
@@ -434,6 +472,7 @@ $conn->close();
             width: 45px;
             height: 45px;
             border-radius: 50%;
+            border: 2px solid var(--primary-dark);
             background-color: var(--primary);
             display: flex;
             justify-content: center;
@@ -449,6 +488,13 @@ $conn->close();
         .user-profile:hover {
             background-color: var(--primary-dark);
             transform: scale(1.05);
+        }
+
+        .user-profile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .dropdown-menu {
@@ -493,6 +539,14 @@ $conn->close();
             font-weight: 700;
             font-size: 1.2rem;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .user-initial img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .user-details {
@@ -560,6 +614,18 @@ $conn->close();
 
         .dropdown-item.logout:hover {
             background-color: rgba(230, 57, 70, 0.1);
+        }
+
+        .dropdown-menu::before {
+            content: '';
+            position: absolute;
+            top: -8px;
+            right: 20px;
+            width: 16px;
+            height: 16px;
+            background-color: white;
+            transform: rotate(45deg);
+            box-shadow: -2px -2px 5px rgba(0, 0, 0, 0.04);
         }
         
         /* Notification Modal */
@@ -858,14 +924,14 @@ $conn->close();
             background: white;
             border-radius: 20px;
             box-shadow: var(--shadow);
-            padding: 30px;
+            padding: 20px 25px;
         }
         
         .section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
+            margin-bottom: 15px;
         }
         
         .section-header h2 {
@@ -942,23 +1008,23 @@ $conn->close();
             border-left: 4px solid var(--primary);
         }
         
-        /* Form Styles */
+        /* Form Styles - SINGLE COLUMN FOR CHANGE PASSWORD */
         .form-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 25px;
+            gap: 15px;
         }
         
-        @media (max-width: 768px) {
-            .form-grid {
-                grid-template-columns: 1fr;
-            }
+        /* Single column for change password */
+        #changePasswordForm .form-grid {
+            display: block;
         }
         
         .form-group {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 3px;
+            margin-bottom: 12px;
         }
         
         .form-group.full-width {
@@ -966,12 +1032,13 @@ $conn->close();
         }
         
         .form-group label {
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             color: var(--dark);
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 5px;
+            margin-bottom: 2px;
         }
         
         .form-group label i {
@@ -984,20 +1051,42 @@ $conn->close();
             font-weight: 700;
         }
         
+        /* UPDATED FORM CONTROL STYLES - FIXED HEIGHT */
+        .form-control-container {
+            position: relative;
+            width: 100%;
+        }
+        
         .form-control {
-            padding: 14px 15px;
+            padding: 10px 45px 10px 12px;
             border: 2px solid var(--light-gray);
-            border-radius: 10px;
-            font-size: 1rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
             color: var(--dark);
             transition: var(--transition);
             background-color: white;
+            width: 100%;
+            box-sizing: border-box;
+            height: 42px; /* FIXED HEIGHT */
+        }
+        
+        /* PASSWORD FIELDS WITH CONSISTENT STYLING */
+        .password-input-group {
+            position: relative;
+            width: 100%;
+        }
+        
+        .password-input-group .form-control {
+            padding-right: 45px;
+            width: 100%;
+            margin-bottom: 3px;
+            height: 42px; /* SAME HEIGHT */
         }
         
         .form-control:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(230, 57, 70, 0.1);
+            box-shadow: 0 0 0 2px rgba(230, 57, 70, 0.1);
         }
         
         .form-control::placeholder {
@@ -1005,9 +1094,41 @@ $conn->close();
         }
         
         .form-text {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--gray);
-            margin-top: 5px;
+            margin-top: 2px;
+        }
+        
+        /* TOGGLE PASSWORD STYLES - CONSISTENT FOR ALL */
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--gray);
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0;
+            width: 25px;
+            height: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            z-index: 10;
+        }
+        
+        .toggle-password:hover {
+            color: var(--primary);
+            background-color: rgba(0, 0, 0, 0.03);
+            border-radius: 50%;
+        }
+        
+        /* Password strength indicator - REMOVED FROM INSIDE INPUT */
+        .password-strength-indicator {
+            display: none; /* REMOVED */
         }
         
         /* Alerts */
@@ -1042,17 +1163,17 @@ $conn->close();
             display: flex;
             gap: 15px;
             justify-content: flex-end;
-            margin-top: 30px;
+            margin-top: 20px;
         }
         
         .btn {
-            padding: 14px 30px;
+            padding: 12px 25px;
             border-radius: 10px;
             font-weight: 600;
             cursor: pointer;
             transition: var(--transition);
             border: none;
-            font-size: 1rem;
+            font-size: 0.95rem;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -1075,6 +1196,19 @@ $conn->close();
         
         .btn-secondary:hover {
             background-color: #ddd;
+            transform: translateY(-2px);
+        }
+        
+        /* Danger Button Style */
+        .btn-danger {
+            background-color: var(--danger) !important;
+            color: white !important;
+            border: 2px solid var(--danger) !important;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c1121f !important;
+            border-color: #c1121f !important;
             transform: translateY(-2px);
         }
         
@@ -1130,6 +1264,10 @@ $conn->close();
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        
+        .upload-header h2 i {
+            font-size: 1.3rem;
         }
         
         .close-upload {
@@ -1225,6 +1363,217 @@ $conn->close();
             display: block;
             color: var(--gray);
             font-size: 0.9rem;
+        }
+        
+        /* Account Deletion Styles */
+        .danger-zone {
+            border: 2px solid rgba(230, 57, 70, 0.3);
+            background-color: rgba(230, 57, 70, 0.05);
+            border-radius: 15px;
+        }
+        
+        .danger-zone .section-header h2 {
+            color: var(--danger);
+        }
+        
+        .danger-zone .section-header h2 i {
+            color: var(--danger);
+        }
+        
+        .danger-warning {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            padding: 15px;
+            background-color: rgba(230, 57, 70, 0.1);
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .danger-warning i {
+            font-size: 1.3rem;
+            color: var(--danger);
+            margin-top: 2px;
+        }
+        
+        .danger-warning-content h3 {
+            color: var(--danger);
+            margin-bottom: 3px;
+            font-size: 1rem;
+        }
+        
+        .danger-warning-content p {
+            color: var(--dark);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .confirmation-text {
+            font-family: monospace;
+            background-color: var(--light-gray);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            margin: 8px 0;
+            font-weight: 600;
+            color: var(--danger);
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        
+        .password-strength {
+            margin-top: 2px;
+            font-size: 0.8rem;
+        }
+        
+        .strength-weak {
+            color: var(--danger);
+        }
+        
+        .strength-medium {
+            color: var(--warning);
+        }
+        
+        .strength-strong {
+            color: var(--success);
+        }
+        
+        /* Password strength meter */
+        .strength-meter {
+            height: 4px;
+            border-radius: 2px;
+            margin-top: 5px;
+            margin-bottom: 5px;
+            overflow: hidden;
+            background-color: var(--light-gray);
+        }
+        
+        .strength-meter-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .strength-meter-fill.weak {
+            background-color: var(--danger);
+            width: 33%;
+        }
+        
+        .strength-meter-fill.medium {
+            background-color: var(--warning);
+            width: 66%;
+        }
+        
+        .strength-meter-fill.strong {
+            background-color: var(--success);
+            width: 100%;
+        }
+        
+        /* Deletion Modal */
+        .deletion-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 4000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .deletion-modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .deletion-content {
+            background-color: white;
+            width: 90%;
+            max-width: 500px;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            transform: translateY(30px);
+            transition: transform 0.3s ease;
+        }
+        
+        .deletion-modal.show .deletion-content {
+            transform: translateY(0);
+        }
+        
+        .deletion-header {
+            background-color: var(--danger);
+            color: white;
+            padding: 25px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .deletion-header h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .deletion-header h2 i {
+            font-size: 1.3rem;
+        }
+        
+        .close-deletion {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        
+        .close-deletion:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .deletion-body {
+            padding: 30px;
+        }
+        
+        .deletion-icon {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        
+        .deletion-icon i {
+            font-size: 4rem;
+            color: var(--danger);
+        }
+        
+        .deletion-warning {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .deletion-warning h3 {
+            font-size: 1.3rem;
+            color: var(--danger);
+            margin-bottom: 10px;
+        }
+        
+        .deletion-warning p {
+            color: var(--dark);
+            line-height: 1.7;
         }
         
         /* Footer */
@@ -1332,13 +1681,13 @@ $conn->close();
         
         @media (max-width: 768px) {
             .profile-section {
-                padding: 20px;
+                padding: 15px 20px;
             }
             
             .section-header {
                 flex-direction: column;
                 align-items: flex-start;
-                gap: 15px;
+                gap: 10px;
             }
             
             .form-actions {
@@ -1351,6 +1700,10 @@ $conn->close();
             }
             
             .upload-content {
+                width: 95%;
+            }
+            
+            .deletion-content {
                 width: 95%;
             }
         }
@@ -1370,6 +1723,10 @@ $conn->close();
                 width: 120px;
                 height: 120px;
                 font-size: 2.5rem;
+            }
+            
+            .form-control {
+                padding: 10px 40px 10px 12px;
             }
         }
     </style>
@@ -1401,11 +1758,11 @@ $conn->close();
                     </div>
                 </div>
                 
-                <!-- Profile dropdown -->
+                <!-- Profile dropdown - UPDATED -->
                 <div class="profile-dropdown">
                     <div class="user-profile" id="profileToggle">
-                        <?php if ($seller_image): ?>
-                            <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>" style="width: 100%; height: 100%; object-fit: cover;">
+                        <?php if (!empty($seller_image)): ?>
+                            <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>">
                         <?php else: ?>
                             <?php echo $initial; ?>
                         <?php endif; ?>
@@ -1414,8 +1771,8 @@ $conn->close();
                         <div class="dropdown-header">
                             <div class="user-info">
                                 <div class="user-initial">
-                                    <?php if ($seller_image): ?>
-                                        <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>" style="width: 100%; height: 100%; object-fit: cover;">
+                                    <?php if (!empty($seller_image)): ?>
+                                        <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>">
                                     <?php else: ?>
                                         <?php echo $initial; ?>
                                     <?php endif; ?>
@@ -1429,9 +1786,6 @@ $conn->close();
                         <div class="dropdown-divider"></div>
                         <a href="seller-profile.php" class="dropdown-item">
                             <i class="fas fa-user"></i> Seller Profile
-                        </a>
-                        <a href="seller-settings.php" class="dropdown-item">
-                            <i class="fas fa-cog"></i> Store Settings
                         </a>
                         <div class="dropdown-divider"></div>
                         <a href="#" class="dropdown-item logout" id="logoutLink">
@@ -1484,20 +1838,6 @@ $conn->close();
         </div>
     <?php endif; ?>
     
-    <?php if ($password_success): ?>
-        <div class="alert alert-success">
-            <i class="fas fa-check-circle"></i>
-            Your password has been changed successfully!
-        </div>
-    <?php endif; ?>
-    
-    <?php if ($password_error): ?>
-        <div class="alert alert-danger">
-            <i class="fas fa-exclamation-circle"></i>
-            <?php echo htmlspecialchars($password_error); ?>
-        </div>
-    <?php endif; ?>
-    
     <?php if ($upload_success): ?>
         <div class="alert alert-success">
             <i class="fas fa-check-circle"></i>
@@ -1512,12 +1852,33 @@ $conn->close();
         </div>
     <?php endif; ?>
     
+    <?php if ($password_success): ?>
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle"></i>
+            Password changed successfully! You can now use your new password.
+        </div>
+    <?php endif; ?>
+    
+    <?php if ($password_error): ?>
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-circle"></i>
+            <?php echo htmlspecialchars($password_error); ?>
+        </div>
+    <?php endif; ?>
+    
+    <?php if ($delete_error): ?>
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-circle"></i>
+            <?php echo htmlspecialchars($delete_error); ?>
+        </div>
+    <?php endif; ?>
+    
     <div class="profile-content">
         <!-- Profile Sidebar -->
         <div class="profile-sidebar">
             <div class="profile-avatar">
                 <div class="avatar-circle" id="avatarCircle">
-                    <?php if ($seller_image): ?>
+                    <?php if (!empty($seller_image)): ?>
                         <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>">
                         <div class="initial" style="display: none;"><?php echo $initial; ?></div>
                     <?php else: ?>
@@ -1530,7 +1891,7 @@ $conn->close();
                 <h3 style="text-align: center; margin-bottom: 10px; color: var(--dark);"><?php echo htmlspecialchars($seller_name); ?></h3>
                 <p style="text-align: center; color: var(--gray); font-size: 0.9rem;">@<?php echo htmlspecialchars($seller_username); ?></p>
                 <div class="avatar-actions" style="margin-top: 20px;">
-                    <button class="btn-avatar btn-avatar-primary" onclick="showUploadModal()">
+                    <button type="button" class="btn-avatar btn-avatar-primary" onclick="showUploadModal()">
                         <i class="fas fa-camera"></i> Change Profile Picture
                     </button>
                     <?php if ($seller_image): ?>
@@ -1634,26 +1995,49 @@ $conn->close();
                 </form>
             </div>
             
-            <!-- Change Password -->
+            <!-- Change Password - SINGLE COLUMN -->
             <div class="profile-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-lock"></i> Change Password</h2>
+                    <h2><i class="fas fa-key"></i> Change Password</h2>
                 </div>
                 
-                <form method="POST" id="passwordForm">
+                <form method="POST" id="changePasswordForm">
                     <div class="form-grid">
                         <div class="form-group">
-                            <label for="current_password"><i class="fas fa-key"></i> Current Password</label>
-                            <input type="password" id="current_password" name="current_password" class="form-control" required>
+                            <label for="current_password"><i class="fas fa-lock"></i> Current Password <span class="required">*</span></label>
+                            <div class="password-input-group">
+                                <input type="password" id="current_password" name="current_password" class="form-control" required>
+                                <button type="button" class="toggle-password" data-target="current_password">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="form-group">
-                            <label for="new_password"><i class="fas fa-lock"></i> New Password</label>
-                            <input type="password" id="new_password" name="new_password" class="form-control" required>
-                            <div class="form-text">Minimum 8 characters</div>
+                            <label for="new_password"><i class="fas fa-key"></i> New Password <span class="required">*</span></label>
+                            <div class="password-input-group">
+                                <input type="password" id="new_password" name="new_password" class="form-control" required 
+                                       pattern=".{8,}" oninput="checkPasswordStrength(this.value)">
+                                <button type="button" class="toggle-password" data-target="new_password">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <div class="strength-meter">
+                                <div class="strength-meter-fill" id="strengthMeter"></div>
+                            </div>
+                            <div class="password-strength" id="passwordStrength">
+                                Password strength: <span id="strengthText">None</span>
+                            </div>
+                            <div class="form-text">Must be at least 8 characters long</div>
                         </div>
                         <div class="form-group">
-                            <label for="confirm_password"><i class="fas fa-lock"></i> Confirm New Password</label>
-                            <input type="password" id="confirm_password" name="confirm_password" class="form-control" required>
+                            <label for="confirm_password"><i class="fas fa-key"></i> Confirm New Password <span class="required">*</span></label>
+                            <div class="password-input-group">
+                                <input type="password" id="confirm_password" name="confirm_password" class="form-control" required>
+                                <button type="button" class="toggle-password" data-target="confirm_password">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Re-enter your new password</div>
                         </div>
                     </div>
                     <div class="form-actions">
@@ -1664,26 +2048,48 @@ $conn->close();
                 </form>
             </div>
             
-            <!-- Account Security -->
-            <div class="profile-section">
+            <!-- Account Deletion - Danger Zone -->
+            <div class="profile-section danger-zone">
                 <div class="section-header">
-                    <h2><i class="fas fa-shield-alt"></i> Account Security</h2>
+                    <h2><i class="fas fa-exclamation-triangle"></i> Danger Zone</h2>
                 </div>
                 
-                <div class="info-grid">
-                    <div class="info-item">
-                        <label>Last Login</label>
-                        <div class="value"><?php echo date('M d, Y h:i A'); ?></div>
-                    </div>
-                    <div class="info-item">
-                        <label>Login Activity</label>
-                        <div class="value">
-                            <a href="login-history.php" style="color: var(--primary); text-decoration: none;">
-                                <i class="fas fa-history"></i> View History
-                            </a>
-                        </div>
+                <div class="danger-warning">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <div class="danger-warning-content">
+                        <h3>Permanent Account Deletion</h3>
+                        <p>
+                            Once you delete your account, there is no going back. All your data including 
+                            profile information, meal listings, order history, and sales records will be 
+                            permanently deleted. This action cannot be undone.
+                        </p>
                     </div>
                 </div>
+                
+                <form method="POST" id="deleteAccountForm" onsubmit="return confirmDeletion()">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="confirm_delete_password"><i class="fas fa-lock"></i> Confirm Your Password <span class="required">*</span></label>
+                            <div class="password-input-group">
+                                <input type="password" id="confirm_delete_password" name="confirm_delete_password" class="form-control" required>
+                                <button type="button" class="toggle-password" data-target="confirm_delete_password">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Type the following to confirm: <span class="required">DELETE MY ACCOUNT</span></label>
+                            <input type="text" id="confirmation_text" name="confirmation_text" class="form-control" 
+                                   placeholder="Type DELETE MY ACCOUNT here" required>
+                            <div class="form-text">You must type exactly as shown above to confirm account deletion</div>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" name="delete_account" class="btn btn-danger">
+                            <i class="fas fa-trash"></i> Delete My Account
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -1702,7 +2108,7 @@ $conn->close();
             <div class="upload-body">
                 <div class="preview-container">
                     <div class="image-preview" id="imagePreview">
-                        <?php if ($seller_image): ?>
+                        <?php if (!empty($seller_image)): ?>
                             <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="Current Profile Picture" id="previewImage">
                         <?php else: ?>
                             <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--light-gray); color: var(--gray); font-size: 4rem; font-weight: 700;">
@@ -1798,11 +2204,11 @@ $conn->close();
     const cancelEditBtn = document.getElementById('cancelEdit');
     const personalInfoView = document.getElementById('personalInfoView');
     const personalInfoForm = document.getElementById('personalInfoForm');
-    const passwordForm = document.getElementById('passwordForm');
     const uploadModal = document.getElementById('uploadModal');
     const closeUpload = document.getElementById('closeUpload');
     const uploadForm = document.getElementById('uploadForm');
     const avatarCircle = document.getElementById('avatarCircle');
+    const changePasswordForm = document.getElementById('changePasswordForm');
 
     // Toggle profile dropdown
     if (profileToggle && dropdownMenu) {
@@ -1880,28 +2286,6 @@ $conn->close();
         });
     }
 
-    // Password form validation
-    if (passwordForm) {
-        passwordForm.addEventListener('submit', function(e) {
-            const newPassword = document.getElementById('new_password').value;
-            const confirmPassword = document.getElementById('confirm_password').value;
-            
-            if (newPassword.length < 8) {
-                e.preventDefault();
-                showNotification('Password must be at least 8 characters long', 'error');
-                return false;
-            }
-            
-            if (newPassword !== confirmPassword) {
-                e.preventDefault();
-                showNotification('Passwords do not match', 'error');
-                return false;
-            }
-            
-            return true;
-        });
-    }
-
     // Upload modal functionality
     function showUploadModal() {
         if (uploadModal) {
@@ -1930,6 +2314,24 @@ $conn->close();
         });
     }
 
+    // Account deletion confirmation
+    function confirmDeletion() {
+        const password = document.getElementById('confirm_delete_password').value;
+        const confirmation = document.getElementById('confirmation_text').value;
+        
+        if (!password) {
+            showNotification('Please enter your password', 'error');
+            return false;
+        }
+        
+        if (confirmation !== "DELETE MY ACCOUNT") {
+            showNotification('Please type DELETE MY ACCOUNT exactly as shown', 'error');
+            return false;
+        }
+        
+        return confirm("Are you ABSOLUTELY sure? This action cannot be undone! All your data will be permanently deleted.");
+    }
+
     // Image preview functionality
     function previewImage(event) {
         const input = event.target;
@@ -1955,6 +2357,109 @@ $conn->close();
             
             reader.readAsDataURL(input.files[0]);
         }
+    }
+
+    // Password strength checker
+    function checkPasswordStrength(password) {
+        const strengthText = document.getElementById('strengthText');
+        const strengthDiv = document.getElementById('passwordStrength');
+        const strengthMeter = document.getElementById('strengthMeter');
+        
+        // Reset classes
+        strengthDiv.className = 'password-strength';
+        strengthMeter.className = 'strength-meter-fill';
+        
+        if (!password) {
+            strengthText.textContent = 'None';
+            return;
+        }
+        
+        let strength = 0;
+        
+        // Length check
+        if (password.length >= 8) strength++;
+        if (password.length >= 12) strength++;
+        
+        // Complexity checks
+        if (/[A-Z]/.test(password)) strength++;
+        if (/[a-z]/.test(password)) strength++;
+        if (/[0-9]/.test(password)) strength++;
+        if (/[^A-Za-z0-9]/.test(password)) strength++;
+        
+        // Determine strength level
+        if (strength <= 2) {
+            strengthText.textContent = 'Weak';
+            strengthDiv.classList.add('strength-weak');
+            strengthMeter.classList.add('weak');
+        } else if (strength <= 4) {
+            strengthText.textContent = 'Medium';
+            strengthDiv.classList.add('strength-medium');
+            strengthMeter.classList.add('medium');
+        } else {
+            strengthText.textContent = 'Strong';
+            strengthDiv.classList.add('strength-strong');
+            strengthMeter.classList.add('strong');
+        }
+    }
+
+    // Toggle password visibility
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('toggle-password') || 
+            e.target.parentElement.classList.contains('toggle-password')) {
+            
+            const button = e.target.classList.contains('toggle-password') ? 
+                          e.target : e.target.parentElement;
+            const targetId = button.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            const icon = button.querySelector('i');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+    });
+
+    // Password change form validation
+    if (changePasswordForm) {
+        changePasswordForm.addEventListener('submit', function(e) {
+            const currentPassword = document.getElementById('current_password').value;
+            const newPassword = document.getElementById('new_password').value;
+            const confirmPassword = document.getElementById('confirm_password').value;
+            
+            if (!currentPassword || !newPassword || !confirmPassword) {
+                e.preventDefault();
+                showNotification('Please fill in all password fields', 'error');
+                return false;
+            }
+            
+            if (newPassword !== confirmPassword) {
+                e.preventDefault();
+                showNotification('New password and confirmation do not match', 'error');
+                document.getElementById('confirm_password').focus();
+                return false;
+            }
+            
+            if (newPassword.length < 8) {
+                e.preventDefault();
+                showNotification('New password must be at least 8 characters long', 'error');
+                return false;
+            }
+            
+            // Check if new password is same as current
+            if (newPassword === currentPassword) {
+                e.preventDefault();
+                showNotification('New password must be different from current password', 'error');
+                return false;
+            }
+            
+            return true;
+        });
     }
 
     // Show notification
@@ -2059,7 +2564,7 @@ $conn->close();
                         Confirm Logout
                     </h3>
                     <p style="color: var(--gray); font-size: 1rem;">
-                        Are you sure you want to logout from Seller Dashboard?
+                        Are you sure you want to logout?
                     </p>
                 </div>
                 <div style="display: flex; gap: 15px; justify-content: center;">
@@ -2099,85 +2604,6 @@ $conn->close();
         });
     }
 
-    // Auto-refresh notification badge every 30 seconds
-    function refreshNotificationBadge() {
-        fetch('check-pending-orders.php')
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    const pendingCount = data.pending_count;
-                    let badge = document.getElementById('pendingBadge');
-                    
-                    // Update or create badge
-                    if (pendingCount > 0) {
-                        if (badge) {
-                            badge.textContent = pendingCount;
-                        } else {
-                            badge = document.createElement('span');
-                            badge.id = 'pendingBadge';
-                            badge.className = 'badge';
-                            badge.textContent = pendingCount;
-                            document.querySelector('.notification-icon-bell').appendChild(badge);
-                        }
-                        
-                        // Add animation if badge wasn't there before
-                        if (!badge.style.animation) {
-                            badge.style.animation = 'pulse 2s infinite';
-                            setTimeout(() => {
-                                badge.style.animation = '';
-                            }, 3000);
-                        }
-                        
-                        // Update modal title if modal is open
-                        const modalTitle = document.querySelector('.notification-header h2');
-                        if (modalTitle) {
-                            modalTitle.innerHTML = `<i class="fas fa-bell"></i> Pending Orders (${pendingCount})`;
-                        }
-                    } else {
-                        // Remove badge if no pending orders
-                        if (badge) {
-                            badge.remove();
-                        }
-                        
-                        // Update modal title
-                        const modalTitle = document.querySelector('.notification-header h2');
-                        if (modalTitle) {
-                            modalTitle.innerHTML = `<i class="fas fa-bell"></i> Pending Orders (0)`;
-                        }
-                    }
-                }
-            })
-            .catch(error => console.error('Error refreshing notifications:', error));
-    }
-
-    // Start auto-refresh if on profile page with notification bell
-    if (document.querySelector('.notification-icon-bell')) {
-        setInterval(refreshNotificationBadge, 30000); // Refresh every 30 seconds
-    }
-
-    // Animate pending badge when there are new orders
-    const pendingBadge = document.getElementById('pendingBadge');
-    if (pendingBadge) {
-        pendingBadge.style.animation = 'pulse 2s infinite';
-        setTimeout(() => {
-            pendingBadge.style.animation = '';
-        }, 3000);
-    }
-
-    // Auto-hide alerts after 5 seconds
-    setTimeout(() => {
-        const alerts = document.querySelectorAll('.alert');
-        alerts.forEach(alert => {
-            alert.style.opacity = '0';
-            alert.style.transition = 'opacity 0.5s ease';
-            setTimeout(() => {
-                if (alert.parentNode) {
-                    alert.parentNode.removeChild(alert);
-                }
-            }, 500);
-        });
-    }, 5000);
-
     // Form validation for file upload
     if (uploadForm) {
         uploadForm.addEventListener('submit', function(e) {
@@ -2207,6 +2633,28 @@ $conn->close();
             return true;
         });
     }
+
+    // Initialize password strength check on page load
+    const newPasswordInput = document.getElementById('new_password');
+    if (newPasswordInput) {
+        newPasswordInput.addEventListener('input', function() {
+            checkPasswordStrength(this.value);
+        });
+    }
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(() => {
+        const alerts = document.querySelectorAll('.alert');
+        alerts.forEach(alert => {
+            alert.style.opacity = '0';
+            alert.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                if (alert.parentNode) {
+                    alert.parentNode.removeChild(alert);
+                }
+            }, 500);
+        });
+    }, 5000);
 </script>
 
 </body>

@@ -88,14 +88,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     exit();
 }
 
-// Get featured meals from database
+// Get featured meals from database - RANDOM AVAILABLE MEALS FROM DIFFERENT SELLERS, LIMIT 6
 $featured_meals = [];
-$sql = "SELECT m.*, s.FullName as SellerName, s.SellerID
+
+// Option 1: Get 6 random meals from available meals
+$sql = "SELECT DISTINCT m.*, s.FullName as SellerName, s.SellerID
         FROM Meal m 
         JOIN Seller s ON m.SellerID = s.SellerID 
         WHERE m.Availability = 'Available' 
-        ORDER BY m.CreatedAt DESC 
+        ORDER BY RAND() 
         LIMIT 6";
+
+// Alternative: Get random meals ensuring variety from different sellers
+// $sql = "SELECT m.*, s.FullName as SellerName, s.SellerID
+//         FROM Meal m 
+//         JOIN Seller s ON m.SellerID = s.SellerID 
+//         WHERE m.Availability = 'Available' 
+//         AND m.MealID IN (
+//             SELECT MealID FROM (
+//                 SELECT MealID, SellerID FROM Meal 
+//                 WHERE Availability = 'Available'
+//                 ORDER BY RAND()
+//             ) AS random_meals
+//             GROUP BY SellerID
+//         )
+//         ORDER BY RAND()
+//         LIMIT 6";
+
 $result = $conn->query($sql);
 if ($result && $result->num_rows > 0) {
     while($row = $result->fetch_assoc()) {
@@ -1623,7 +1642,7 @@ $conn->close();
                     <div style="font-size: 1.5rem; color: var(--gray); margin-bottom: 20px;">
                         <i class="fas fa-utensils" style="font-size: 2.5rem; color: #ddd;"></i>
                     </div>
-                    <h3 style="color: var(--gray); margin-bottom: 15px;">No meals available yet</h3>
+                    <h3 style="color: var(--gray); margin-bottom: 15px;">No available meals at the moment</h3>
                     <p style="color: var(--gray); margin-bottom: 25px;">Check back later for new meal offerings!</p>
                 </div>
             <?php endif; ?>
@@ -1979,7 +1998,7 @@ $conn->close();
             
             notification.style.cssText = `
                 position: fixed;
-                top: 30px;
+                top: 100px;
                 right: 30px;
                 background-color: ${bgColor};
                 color: white;

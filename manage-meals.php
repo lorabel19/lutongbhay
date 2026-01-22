@@ -37,6 +37,7 @@ if (!$seller) {
 // Initialize seller variables with default values
 $seller_name = isset($seller['FullName']) ? $seller['FullName'] : 'Seller';
 $seller_email = isset($seller['Email']) ? $seller['Email'] : '';
+$seller_image = isset($seller['ImagePath']) ? $seller['ImagePath'] : ''; // Add this line
 $initial = isset($seller['FullName']) ? strtoupper(substr($seller['FullName'], 0, 1)) : 'S';
 
 // Delete Meal
@@ -483,7 +484,7 @@ $conn->close();
             }
         }
         
-        /* Profile Dropdown */
+        /* Profile Dropdown - UPDATED */
         .profile-dropdown {
             position: relative;
         }
@@ -492,6 +493,7 @@ $conn->close();
             width: 45px;
             height: 45px;
             border-radius: 50%;
+            border: 2px solid var(--primary-dark);
             background-color: var(--primary);
             display: flex;
             justify-content: center;
@@ -507,6 +509,13 @@ $conn->close();
         .user-profile:hover {
             background-color: var(--primary-dark);
             transform: scale(1.05);
+        }
+
+        .user-profile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .dropdown-menu {
@@ -551,6 +560,14 @@ $conn->close();
             font-weight: 700;
             font-size: 1.2rem;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .user-initial img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .user-details {
@@ -1012,6 +1029,9 @@ $conn->close();
             box-shadow: var(--shadow);
             transition: var(--transition);
             position: relative;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
         }
         
         .meal-card:hover {
@@ -1020,9 +1040,10 @@ $conn->close();
         }
         
         .meal-image {
-            height: 180px;
+            height: 250px;
             overflow: hidden;
             position: relative;
+            background-color: #f5f5f5;
         }
         
         .meal-image img {
@@ -1058,6 +1079,9 @@ $conn->close();
         
         .meal-info {
             padding: 20px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
         }
         
         .meal-header {
@@ -1065,6 +1089,7 @@ $conn->close();
             justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 12px;
+            min-height: 60px;
         }
         
         .meal-title {
@@ -1072,12 +1097,15 @@ $conn->close();
             font-weight: 700;
             color: var(--dark);
             line-height: 1.3;
+            flex: 1;
+            margin-right: 10px;
         }
         
         .meal-price {
             font-size: 1.3rem;
             font-weight: 800;
             color: var(--primary);
+            white-space: nowrap;
         }
         
         .meal-meta {
@@ -1086,6 +1114,7 @@ $conn->close();
             margin-bottom: 15px;
             font-size: 0.9rem;
             color: var(--gray);
+            flex-wrap: wrap;
         }
         
         .meal-category {
@@ -1106,17 +1135,21 @@ $conn->close();
             font-size: 0.95rem;
             margin-bottom: 20px;
             line-height: 1.5;
-            height: 45px;
+            flex: 1;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
             overflow: hidden;
         }
         
         .meal-actions {
             display: flex;
             gap: 10px;
+            margin-top: auto;
         }
         
         .btn-action {
-            padding: 8px 15px;
+            padding: 10px 15px;
             border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
@@ -1138,6 +1171,7 @@ $conn->close();
         
         .btn-edit:hover {
             background-color: #ddd;
+            color: var(--dark);
         }
         
         .btn-delete {
@@ -1148,6 +1182,7 @@ $conn->close();
         
         .btn-delete:hover {
             background-color: rgba(230, 57, 70, 0.2);
+            color: var(--danger);
         }
         
         .empty-state {
@@ -1702,15 +1737,25 @@ $conn->close();
                     </div>
                 </div>
                 
-                <!-- Profile dropdown -->
+                <!-- Profile dropdown - UPDATED -->
                 <div class="profile-dropdown">
                     <div class="user-profile" id="profileToggle">
-                        <?php echo $initial; ?>
+                        <?php if (!empty($seller_image)): ?>
+                            <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>">
+                        <?php else: ?>
+                            <?php echo $initial; ?>
+                        <?php endif; ?>
                     </div>
                     <div class="dropdown-menu" id="dropdownMenu">
                         <div class="dropdown-header">
                             <div class="user-info">
-                                <div class="user-initial"><?php echo $initial; ?></div>
+                                <div class="user-initial">
+                                    <?php if (!empty($seller_image)): ?>
+                                        <img src="<?php echo htmlspecialchars($seller_image); ?>" alt="<?php echo htmlspecialchars($seller_name); ?>">
+                                    <?php else: ?>
+                                        <?php echo $initial; ?>
+                                    <?php endif; ?>
+                                </div>
                                 <div class="user-details">
                                     <div class="user-name"><?php echo htmlspecialchars($seller_name); ?></div>
                                     <div class="user-email"><?php echo htmlspecialchars($seller_email); ?></div>
@@ -1720,9 +1765,6 @@ $conn->close();
                         <div class="dropdown-divider"></div>
                         <a href="seller-profile.php" class="dropdown-item">
                             <i class="fas fa-user"></i> Seller Profile
-                        </a>
-                        <a href="seller-settings.php" class="dropdown-item">
-                            <i class="fas fa-cog"></i> Store Settings
                         </a>
                         <div class="dropdown-divider"></div>
                         <a href="#" class="dropdown-item logout" id="logoutLink">
@@ -1860,11 +1902,29 @@ $conn->close();
     <div class="meals-grid" id="mealsGrid">
         <?php if (count($meals) > 0): ?>
             <?php foreach ($meals as $meal): ?>
+                <?php
+                // Determine availability badge class
+                $availability_class = $meal['Availability'] == 'Available' ? 'badge-available' : 'badge-not-available';
+                
+                // Ensure image path is valid
+                $meal_image = !empty($meal['ImagePath']) ? $meal['ImagePath'] : 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80';
+                
+                // Format date
+                $created_date = date('M d, Y', strtotime($meal['CreatedAt']));
+                
+                // Truncate description
+                $description = htmlspecialchars($meal['Description']);
+                if (strlen($description) > 150) {
+                    $description = substr($description, 0, 150) . '...';
+                }
+                ?>
+                
                 <div class="meal-card">
                     <div class="meal-image">
-                        <img src="<?php echo htmlspecialchars($meal['ImagePath'] ? $meal['ImagePath'] : 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'); ?>" 
-                             alt="<?php echo htmlspecialchars($meal['Title']); ?>">
-                        <div class="availability-badge badge-<?php echo strtolower(str_replace(' ', '-', $meal['Availability'])); ?>">
+                        <img src="<?php echo $meal_image; ?>" 
+                             alt="<?php echo htmlspecialchars($meal['Title']); ?>"
+                             onerror="this.src='https://images.unsplash.com/photo-1565958011703-44f9829ba187?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80'">
+                        <div class="availability-badge <?php echo $availability_class; ?>">
                             <?php echo $meal['Availability']; ?>
                         </div>
                     </div>
@@ -1879,12 +1939,12 @@ $conn->close();
                             <span class="meal-category"><?php echo $meal['Category']; ?></span>
                             <span class="meal-date">
                                 <i class="far fa-calendar"></i>
-                                <?php echo date('M d, Y', strtotime($meal['CreatedAt'])); ?>
+                                <?php echo $created_date; ?>
                             </span>
                         </div>
                         
                         <p class="meal-description">
-                            <?php echo htmlspecialchars(substr($meal['Description'], 0, 100)) . (strlen($meal['Description']) > 100 ? '...' : ''); ?>
+                            <?php echo $description; ?>
                         </p>
                         
                         <div class="meal-actions">
@@ -2322,22 +2382,38 @@ $conn->close();
         document.body.style.overflow = 'auto';
     }
 
-    // Edit meal modal
+    // Edit meal modal - updated to fetch meal data
     function showEditMealModal(mealId) {
-        // Fetch meal data via AJAX
-        fetch(`get-meal-data.php?id=${mealId}`)
-            .then(response => response.json())
+        // Fetch meal data via AJAX (you'll need to create a separate endpoint)
+        // For now, let's use a simpler approach by passing data from PHP
+        // or we'll need to create get-meal-data.php endpoint
+        
+        // First, let's hide the modal while we prepare data
+        document.getElementById('editMealModal').style.display = 'flex';
+        
+        // Show loading state
+        const messageContainer = document.getElementById('editMealMessageContainer');
+        messageContainer.innerHTML = '<div class="modal-alert"><i class="fas fa-spinner fa-spin"></i> Loading meal data...</div>';
+        
+        // Fetch meal data
+        fetch('get-meal-data.php?id=' + mealId)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
             .then(data => {
-                if (data.success) {
+                if (data.success && data.meal) {
                     const meal = data.meal;
                     
                     // Populate form fields
                     document.getElementById('editMealId').value = mealId;
-                    document.getElementById('editMealTitle').value = meal.Title;
-                    document.getElementById('editMealDescription').value = meal.Description;
-                    document.getElementById('editMealPrice').value = meal.Price;
-                    document.getElementById('editMealCategory').value = meal.Category;
-                    document.getElementById('editMealAvailability').value = meal.Availability;
+                    document.getElementById('editMealTitle').value = meal.Title || '';
+                    document.getElementById('editMealDescription').value = meal.Description || '';
+                    document.getElementById('editMealPrice').value = meal.Price || '';
+                    document.getElementById('editMealCategory').value = meal.Category || '';
+                    document.getElementById('editMealAvailability').value = meal.Availability || 'Available';
                     
                     // Set image preview if exists
                     if (meal.ImagePath) {
@@ -2352,18 +2428,21 @@ $conn->close();
                         imageUploadWrapper.classList.add('has-image');
                     }
                     
-                    // Show modal
-                    document.getElementById('editMealModal').style.display = 'flex';
+                    // Clear message
+                    messageContainer.innerHTML = '';
+                    
+                    // Focus on title
                     document.getElementById('editMealTitle').focus();
-                    document.body.style.overflow = 'hidden';
                 } else {
-                    alert('Error loading meal data: ' + data.message);
+                    messageContainer.innerHTML = '<div class="modal-alert error"><i class="fas fa-exclamation-circle"></i> Error loading meal data: ' + (data.message || 'Unknown error') + '</div>';
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                alert('Error loading meal data');
+                messageContainer.innerHTML = '<div class="modal-alert error"><i class="fas fa-exclamation-circle"></i> Error loading meal data. Please try again.</div>';
             });
+        
+        document.body.style.overflow = 'hidden';
     }
 
     function hideEditMealModal() {
@@ -2428,7 +2507,7 @@ $conn->close();
         
         input.value = '';
         preview.classList.remove('active');
-        previewImg.src = '';
+        document.getElementById('addPreviewImg').src = '';
         uploadPlaceholder.style.display = 'flex';
         imageUploadWrapper.classList.remove('has-image');
     }
@@ -2489,7 +2568,7 @@ $conn->close();
         
         input.value = '';
         preview.classList.remove('active');
-        previewImg.src = '';
+        document.getElementById('editPreviewImg').src = '';
         uploadPlaceholder.style.display = 'flex';
         imageUploadWrapper.classList.remove('has-image');
     }
@@ -2509,6 +2588,17 @@ $conn->close();
         const messageContainer = document.getElementById('editMealMessageContainer');
         messageContainer.style.display = 'none';
         messageContainer.innerHTML = '';
+        
+        // Reset image preview to original
+        const preview = document.getElementById('editImagePreview');
+        const previewImg = document.getElementById('editPreviewImg');
+        const uploadPlaceholder = document.getElementById('editUploadPlaceholder');
+        const imageUploadWrapper = document.getElementById('editImageUploadWrapper');
+        
+        preview.classList.remove('active');
+        previewImg.src = '';
+        uploadPlaceholder.style.display = 'flex';
+        imageUploadWrapper.classList.remove('has-image');
     }
 
     // Close modals when clicking outside
@@ -2575,7 +2665,7 @@ $conn->close();
                     Confirm Logout
                 </h3>
                 <p style="color: var(--gray); font-size: 1rem;">
-                    Are you sure you want to logout from Seller Dashboard?
+                    Are you sure you want to logout?
                 </p>
             </div>
             <div style="display: flex; gap: 15px; justify-content: center;">
